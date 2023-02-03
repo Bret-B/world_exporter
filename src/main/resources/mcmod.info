@@ -1,0 +1,16 @@
+[
+{
+  "modid": "worldexporter",
+  "name": "World Exporter",
+  "description": "Export a portion of the world into a Wavefront .obj file",
+  "version": "${version}",
+  "mcversion": "${mcversion}",
+  "url": "",
+  "updateUrl": "",
+  "authorList": ["Bret-B"],
+  "credits": "",
+  "logoFile": "",
+  "screenshots": [],
+  "dependencies": []
+}
+]
