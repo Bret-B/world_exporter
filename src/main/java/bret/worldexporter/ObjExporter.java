@@ -2,15 +2,20 @@ package bret.worldexporter;
 
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.BlockModelShapes;
 import net.minecraft.client.renderer.BlockRendererDispatcher;
+import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.block.model.IBakedModel;
 import net.minecraft.client.renderer.color.BlockColors;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
+import net.minecraft.client.renderer.vertex.VertexFormat;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.EnumFacing;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3i;
 import net.minecraft.world.World;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -18,6 +23,7 @@ import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
 
+import javax.annotation.Nullable;
 import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -31,8 +37,8 @@ import java.math.RoundingMode;
 import java.nio.IntBuffer;
 import java.nio.file.Files;
 import java.text.DecimalFormat;
-import java.util.*;
 import java.util.List;
+import java.util.*;
 
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
@@ -44,12 +50,23 @@ public class ObjExporter {
 
     private final Minecraft mc = Minecraft.getMinecraft();
     private final BlockRendererDispatcher blockRenderer = mc.getBlockRendererDispatcher();
+    private final BlockModelShapes blockModelShapes = blockRenderer.getBlockModelShapes();
     private final BlockColors blockColors = mc.getBlockColors();
-    private final Logger logger = LogManager.getLogger(WorldExporter.MODID);
+    private final static Logger logger = LogManager.getLogger(WorldExporter.MODID);
+
+    private final BufferBuilder fluidBuilder = new BufferBuilder(2048);
+    private static final VertexFormat fluidFormat = new VertexFormat();
 
     private static final String f = "#.#####";
     private static final DecimalFormat df = new DecimalFormat(f);
     private static BufferedImage atlasImage;
+
+    static {
+        fluidFormat.addElement(DefaultVertexFormats.POSITION_3F);
+        fluidFormat.addElement(DefaultVertexFormats.COLOR_4UB);
+        fluidFormat.addElement(DefaultVertexFormats.TEX_2F);
+        fluidFormat.addElement(DefaultVertexFormats.TEX_2S);
+    }
 
     public ObjExporter() {
         df.setRoundingMode(RoundingMode.HALF_UP);
@@ -71,22 +88,25 @@ public class ObjExporter {
     }
 
     public void buildObjData(EntityPlayer player, int radius) {
+        fluidBuilder.setTranslation((int) -player.posX, 0, (int) -player.posZ);
+
         double playerX = player.posX;
         double playerZ = player.posZ;
         World world = player.getEntityWorld();
         for (int x = -radius; x <= radius; ++x) {
             for (int z = -radius; z <= radius; ++z) {
                 for (int y = 255; y >= 0; --y) {
+                    Vec3i offsets = new Vec3i(x, y, z);
                     BlockPos blockPos = new BlockPos(x + playerX, y, z + playerZ);
                     // TODO: need to pass in specific faces to always render instead of the entire block
                     //  since this causes sides to be forcibly rendered even when they should not be
-                    parseBlock(world, blockPos, x == radius || x == -radius || z == radius || z == -radius || y == 255 || y == 0);
+                    parseBlock(world, blockPos, x == radius || x == -radius || z == radius || z == -radius || y == 255 || y == 0, offsets);
                 }
             }
         }
     }
 
-    private void parseBlock(World world, BlockPos blockPos, boolean isEdge) {
+    private void parseBlock(World world, BlockPos blockPos, boolean isEdge, Vec3i offsets) {
         IBlockState actualState = world.getBlockState(blockPos).getActualState(world, blockPos);
         if (actualState.getBlock().isAir(actualState, world, blockPos)) {
             return;
@@ -111,42 +131,56 @@ public class ObjExporter {
                 if (quads.size() == 0) {
                     return;
                 }
-                addQuads(quads, blockPos, actualState, world);
+                addQuads(quads, blockPos, actualState, world, offsets);
                 break;
             case LIQUID:  // TODO: fluid rendering
+                fluidBuilder.begin(7, fluidFormat);
+                if (blockRenderer.fluidRenderer.renderFluid(world, actualState, blockPos, fluidBuilder)) {
+                    int newVertexCount = fluidBuilder.getVertexCount();
+                    int[] vertexData = new int[7 * newVertexCount];
+                    fluidBuilder.getByteBuffer().asIntBuffer().get(vertexData, 0, 7 * newVertexCount);
+                    TextureAtlasSprite sprite = blockModelShapes.getTexture(actualState);
+                    int color = blockColors.colorMultiplier(actualState, world, blockPos, 0);
+                    addData(vertexData, sprite, color, newVertexCount, null);
+                }
+                fluidBuilder.finishDrawing();
+                break;
             case ENTITYBLOCK_ANIMATED:  // TODO: determine if quads/textures can be obtained from animated blocks
             case INVISIBLE:   // TODO: INVISIBLE blocks with possible collision skipped?
             default:
         }
     }
 
+// TODO: to add light: look at:
+//  actualState.getBlock().getLightValue();
 
-    private void addQuads(List<BakedQuad> quads, BlockPos pos, IBlockState actualState, World world) {
+    private void addQuads(List<BakedQuad> quads, BlockPos pos, IBlockState actualState, World world, Vec3i offsets) {
         for (BakedQuad quad : quads) {
-            TextureAtlasSprite sprite = quad.getSprite();
-            String resource = sprite.getIconName();
-            HashSet<String> modelsForResource = resourceModelMap.get(resource);
             int tintIndex = quad.getTintIndex();
             int color = tintIndex == -1 ? -1 : blockColors.colorMultiplier(actualState, world, pos, tintIndex);
-            String model = color == -1 ? resource : resource + color;
-            if (modelsForResource == null) {
-                modelsForResource = new HashSet<>();
-                resourceModelMap.put(resource, modelsForResource);
-            }
-            modelsForResource.add(model);
-
-            List<Quad> storedQuads = modelQuadsMap.get(model);
-            if (storedQuads == null) {
-                List<Quad> newResourceList = new ArrayList<>();
-                modelQuadsMap.put(model, newResourceList);
-                storedQuads = newResourceList;
-
-                modelSpriteMap.put(model, sprite);
-
-                modelColorMap.put(model, color);
-            }
-            storedQuads.add(new Quad(quad, pos));
+            addData(quad.getVertexData(), quad.getSprite(), color, 4, offsets);
         }
+    }
+
+    private void addData(int[] vertexData, TextureAtlasSprite sprite, int color, int vertCount, @Nullable Vec3i offsets) {
+        String resource = sprite.getIconName();
+
+        String model = color == -1 ? resource : resource + color;
+        HashSet<String> modelsForResource = resourceModelMap.computeIfAbsent(resource, k -> new HashSet<>());
+        modelsForResource.add(model);
+
+        List<Quad> storedQuads = modelQuadsMap.get(model);
+        if (storedQuads == null) {
+            List<Quad> newResourceList = new ArrayList<>();
+            modelQuadsMap.put(model, newResourceList);
+            storedQuads = newResourceList;
+
+            modelSpriteMap.put(model, sprite);
+
+            modelColorMap.put(model, color);
+        }
+
+        storedQuads.addAll(Quad.getQuads(vertexData, sprite, vertCount, offsets));
     }
 
     public void exportAllData(String objFilenameIn, String mtlFilenameIn) throws IOException {
@@ -187,6 +221,11 @@ public class ObjExporter {
                         vertices += 4;
                         textureCoords += 4;
                     }
+
+                    // Model information can now be removed from the maps for garbage collection
+                    modelQuadsMap.remove(modelName);
+                    modelSpriteMap.remove(modelName);
+                    modelColorMap.remove(modelName);
                 }
             }
 

@@ -1,12 +1,16 @@
 package bret.worldexporter;
 
-import net.minecraft.client.renderer.block.model.BakedQuad;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.util.math.Vec3i;
 
+import javax.annotation.Nullable;
 import javax.vecmath.Vector2f;
 import javax.vecmath.Vector3f;
 import java.math.RoundingMode;
 import java.text.DecimalFormat;
+import java.util.ArrayList;
+
+import static java.util.Arrays.copyOfRange;
 
 
 public class Quad {
@@ -15,23 +19,37 @@ public class Quad {
     private static final String f = "#.#####";
     private static final DecimalFormat df = new DecimalFormat(f);
 
-    public Quad(BakedQuad quadIn, BlockPos pos) {
+
+    public Quad(int[] vertexData, TextureAtlasSprite sprite, @Nullable Vec3i offsets) {
         df.setRoundingMode(RoundingMode.HALF_UP);
-        int[] vertexData = quadIn.getVertexData();
-        float uDist = quadIn.getSprite().getMaxU() - quadIn.getSprite().getMinU();
-        float vDist = quadIn.getSprite().getMaxV() - quadIn.getSprite().getMinV();
+        float uDist = sprite.getMaxU() - sprite.getMinU();
+        float vDist = sprite.getMaxV() - sprite.getMinV();
+
         for (int i = 0; i < 4; ++i) {
             vertices[i] = new Vector3f();
             uvpairs[i] = new Vector2f();
 
             int offset = i * 7;
-            vertices[i].x = Float.intBitsToFloat(vertexData[offset]) + pos.getX();
-            vertices[i].y = Float.intBitsToFloat(vertexData[offset + 1]) + pos.getY();
-            vertices[i].z = Float.intBitsToFloat(vertexData[offset + 2]) + pos.getZ();
+            vertices[i].x = Float.intBitsToFloat(vertexData[offset]);
+            vertices[i].y = Float.intBitsToFloat(vertexData[offset + 1]);
+            vertices[i].z = Float.intBitsToFloat(vertexData[offset + 2]);
+            if (offsets != null) {
+                vertices[i].x += offsets.getX();
+                vertices[i].y += offsets.getY();
+                vertices[i].z += offsets.getZ();
+            }
 
-            uvpairs[i].x = (Float.intBitsToFloat(vertexData[offset + 4]) - quadIn.getSprite().getMinU()) / uDist;  // U
-            uvpairs[i].y = 1 - (Float.intBitsToFloat(vertexData[offset + 5]) - quadIn.getSprite().getMinV()) / vDist;  // V
+            uvpairs[i].x = (Float.intBitsToFloat(vertexData[offset + 4]) - sprite.getMinU()) / uDist;  // U
+            uvpairs[i].y = 1 - (Float.intBitsToFloat(vertexData[offset + 5]) - sprite.getMinV()) / vDist;  // V
         }
+    }
+
+    static public ArrayList<Quad> getQuads(int[] vertexData, TextureAtlasSprite sprite, int vertexCount, @Nullable Vec3i offsets) {
+        ArrayList<Quad> quadsList = new ArrayList<>();
+        for (int i = 0; i < vertexCount / 4; ++i) {
+            quadsList.add(new Quad(copyOfRange(vertexData, i * 28, i * 28 + 28), sprite, offsets));
+        }
+        return quadsList;
     }
 
     // returns a String of relevant .obj file lines
