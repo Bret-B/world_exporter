@@ -2,9 +2,7 @@ package bret.worldexporter;
 
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.*;
-import net.minecraft.client.renderer.color.BlockColors;
-import net.minecraft.client.renderer.color.IBlockColor;
+import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.client.renderer.vertex.VertexFormat;
 import net.minecraft.client.renderer.vertex.VertexFormatElement;
@@ -26,14 +24,10 @@ import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.awt.image.PixelGrabber;
 import java.awt.image.RescaleOp;
-import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
-import java.text.DecimalFormat;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
@@ -70,7 +64,7 @@ public class Exporter {
         int playerZ = (int) Math.round(player.posZ);
 
         IBlockAccess world = player.getEntityWorld();
-        BlockPos startPos = new BlockPos(playerX + radius, 255, playerZ+ radius);
+        BlockPos startPos = new BlockPos(playerX + radius, 255, playerZ + radius);
         BlockPos endPos = new BlockPos(playerX - radius, 0, playerZ - radius);
 
 
@@ -105,7 +99,8 @@ public class Exporter {
 //				if (Config.isShaders()) SVertexBuilder.pushEntity(state, pos, blockAccess, bufferBuilder);
                 try {
                     blockRenderer.renderBlock(state, pos, world, bufferBuilder);
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                }
 //				if (Config.isShaders()) SVertexBuilder.popEntity(bufferBuilder);
             }
             ForgeHooksClient.setRenderLayer(null);

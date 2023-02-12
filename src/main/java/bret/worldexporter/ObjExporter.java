@@ -12,7 +12,10 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public class ObjExporter extends Exporter {
     // A set of UV bounds uniquely identifies a texture, then an integer color for the texture identifies a list of related quads

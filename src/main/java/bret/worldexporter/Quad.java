@@ -1,7 +1,6 @@
 package bret.worldexporter;
 
 import javax.vecmath.Vector2f;
-import java.text.DecimalFormat;
 
 public class Quad {
 

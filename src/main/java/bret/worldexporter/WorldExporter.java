@@ -35,11 +35,10 @@ public class WorldExporter {
 
     @EventHandler
     public void init(FMLPostInitializationEvent event) {
-        PermissionAPI.registerNode("worldexport", DefaultPermissionLevel.valueOf("ALL"), "Dump an area of the world to disk as a Wavefront .obj file");
         ClientCommandHandler.instance.registerCommand(new WorldExport());
+        PermissionAPI.registerNode("worldexporter.worldexport", DefaultPermissionLevel.ALL, "Dump an area of the world to disk as a Wavefront .obj file");
     }
 
-    // TODO: add support for radius as command argument
     public static class WorldExport extends CommandBase {
         @Override
         public void execute(MinecraftServer server, ICommandSender sender, String[] params) throws CommandException {
@@ -47,7 +46,7 @@ public class WorldExporter {
             if (player != null) {
                 int radius = 64;
                 try {
-                    radius = params.length > 0 ? Integer.parseInt(params[0]) : 128;
+                    radius = params.length > 0 ? Integer.parseInt(params[0]) : 64;
                 } catch (NumberFormatException ignored) {
                 }
 
@@ -57,6 +56,7 @@ public class WorldExporter {
                     objExporter.exportAllData("world.obj", "world.mtl");
                 } catch (IOException e) {
                     logger.error("Unable to export world data");
+
                 }
             }
         }
@@ -69,6 +69,11 @@ public class WorldExporter {
         @Override
         public String getUsage(ICommandSender sender) {
             return "command.worldexport.usage";
+        }
+
+        @Override
+        public boolean checkPermission(MinecraftServer server, ICommandSender sender) {
+            return true;
         }
     }
 }
