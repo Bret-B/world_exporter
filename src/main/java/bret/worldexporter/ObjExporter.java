@@ -1,189 +1,31 @@
 package bret.worldexporter;
 
-import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.BlockModelShapes;
-import net.minecraft.client.renderer.BlockRendererDispatcher;
-import net.minecraft.client.renderer.BufferBuilder;
-import net.minecraft.client.renderer.block.model.BakedQuad;
-import net.minecraft.client.renderer.block.model.IBakedModel;
-import net.minecraft.client.renderer.color.BlockColors;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
-import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
-import net.minecraft.client.renderer.vertex.VertexFormat;
-import net.minecraft.entity.player.EntityPlayer;
-import net.minecraft.util.EnumFacing;
-import net.minecraft.util.ResourceLocation;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3i;
-import net.minecraft.world.World;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.lwjgl.BufferUtils;
-import org.lwjgl.opengl.GL11;
-import org.lwjgl.opengl.GL12;
 
-import javax.annotation.Nullable;
 import javax.imageio.ImageIO;
-import java.awt.*;
+import javax.vecmath.Vector2f;
+import javax.vecmath.Vector3f;
 import java.awt.image.BufferedImage;
-import java.awt.image.PixelGrabber;
-import java.awt.image.RescaleOp;
+import java.awt.image.RasterFormatException;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.math.RoundingMode;
-import java.nio.IntBuffer;
 import java.nio.file.Files;
-import java.text.DecimalFormat;
-import java.util.List;
 import java.util.*;
 
-import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
-
-public class ObjExporter {
-    private final Map<String, List<Quad>> modelQuadsMap = new HashMap<>();
-    private final Map<String, TextureAtlasSprite> modelSpriteMap = new HashMap<>();
-    private final Map<String, Integer> modelColorMap = new HashMap<>();
-    private final Map<String, HashSet<String>> resourceModelMap = new HashMap<>();
-
-    private final Minecraft mc = Minecraft.getMinecraft();
-    private final BlockRendererDispatcher blockRenderer = mc.getBlockRendererDispatcher();
-    private final BlockModelShapes blockModelShapes = blockRenderer.getBlockModelShapes();
-    private final BlockColors blockColors = mc.getBlockColors();
-    private final static Logger logger = LogManager.getLogger(WorldExporter.MODID);
-
-    private final BufferBuilder fluidBuilder = new BufferBuilder(2048);
-    private static final VertexFormat fluidFormat = new VertexFormat();
-
-    private static final String f = "#.#####";
-    private static final DecimalFormat df = new DecimalFormat(f);
-    private static BufferedImage atlasImage;
-
-    static {
-        fluidFormat.addElement(DefaultVertexFormats.POSITION_3F);
-        fluidFormat.addElement(DefaultVertexFormats.COLOR_4UB);
-        fluidFormat.addElement(DefaultVertexFormats.TEX_2F);
-        fluidFormat.addElement(DefaultVertexFormats.TEX_2S);
-    }
+public class ObjExporter extends Exporter {
+    // A set of UV bounds uniquely identifies a texture, then an integer color for the texture identifies a list of related quads
+    private final Map<UVBounds, Map<Integer, List<Quad>>> uvColorQuadMap = new HashMap<>();
 
     public ObjExporter() {
-        df.setRoundingMode(RoundingMode.HALF_UP);
-
-        // Create entire atlas image as a BufferedImage to be used when exporting
-        int textureId = mc.getTextureManager().getTexture(new ResourceLocation("minecraft", "textures/atlas/blocks.png")).getGlTextureId();
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, textureId);
-        GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
-        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
-        int atlasWidth = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_WIDTH);
-        int atlasHeight = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_HEIGHT);
-        int size = atlasWidth * atlasHeight;
-        atlasImage = new BufferedImage(atlasWidth, atlasHeight, TYPE_INT_ARGB);
-        IntBuffer buffer = BufferUtils.createIntBuffer(size);
-        int[] data = new int[size];
-        GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, GL12.GL_BGRA, GL12.GL_UNSIGNED_INT_8_8_8_8_REV, buffer);
-        buffer.get(data);
-        atlasImage.setRGB(0, 0, atlasWidth, atlasHeight, data, 0, atlasWidth);
     }
 
-    public void buildObjData(EntityPlayer player, int radius) {
-        fluidBuilder.setTranslation((int) -player.posX, 0, (int) -player.posZ);
-
-        double playerX = player.posX;
-        double playerZ = player.posZ;
-        World world = player.getEntityWorld();
-        for (int x = -radius; x <= radius; ++x) {
-            for (int z = -radius; z <= radius; ++z) {
-                for (int y = 255; y >= 0; --y) {
-                    Vec3i offsets = new Vec3i(x, y, z);
-                    BlockPos blockPos = new BlockPos(x + playerX, y, z + playerZ);
-                    // TODO: need to pass in specific faces to always render instead of the entire block
-                    //  since this causes sides to be forcibly rendered even when they should not be
-                    parseBlock(world, blockPos, x == radius || x == -radius || z == radius || z == -radius || y == 255 || y == 0, offsets);
-                }
-            }
-        }
-    }
-
-    private void parseBlock(World world, BlockPos blockPos, boolean isEdge, Vec3i offsets) {
-        IBlockState actualState = world.getBlockState(blockPos).getActualState(world, blockPos);
-        if (actualState.getBlock().isAir(actualState, world, blockPos)) {
-            return;
-        }
-
-        switch (actualState.getRenderType()) {
-            case MODEL:
-                IBakedModel model = blockRenderer.getModelForState(actualState);
-                // A few mods may throw a NullPointerException trying to obtain quads with side null
-                List<BakedQuad> quads = new ArrayList<>();
-                try {
-                    quads.addAll(model.getQuads(actualState, null, 0));
-                } catch (NullPointerException ignored) {}
-
-                for (EnumFacing facing : EnumFacing.values()) {
-                    BlockPos testBlock = blockPos.offset(facing);
-                    if (!isEdge && (world.getBlockState(testBlock).getActualState(world, testBlock).isOpaqueCube() || !actualState.shouldSideBeRendered(world, blockPos, facing))) {
-                        continue;
-                    }
-                    quads.addAll(model.getQuads(actualState, facing, 0));
-                }
-                if (quads.size() == 0) {
-                    return;
-                }
-                addQuads(quads, blockPos, actualState, world, offsets);
-                break;
-            case LIQUID:  // TODO: fluid rendering
-                fluidBuilder.begin(7, fluidFormat);
-                if (blockRenderer.fluidRenderer.renderFluid(world, actualState, blockPos, fluidBuilder)) {
-                    int newVertexCount = fluidBuilder.getVertexCount();
-                    int[] vertexData = new int[7 * newVertexCount];
-                    fluidBuilder.getByteBuffer().asIntBuffer().get(vertexData, 0, 7 * newVertexCount);
-                    TextureAtlasSprite sprite = blockModelShapes.getTexture(actualState);
-                    int color = blockColors.colorMultiplier(actualState, world, blockPos, 0);
-                    addData(vertexData, sprite, color, newVertexCount, null);
-                }
-                fluidBuilder.finishDrawing();
-                break;
-            case ENTITYBLOCK_ANIMATED:  // TODO: determine if quads/textures can be obtained from animated blocks
-            case INVISIBLE:   // TODO: INVISIBLE blocks with possible collision skipped?
-            default:
-        }
-    }
-
-// TODO: to add light: look at:
-//  actualState.getBlock().getLightValue();
-
-    private void addQuads(List<BakedQuad> quads, BlockPos pos, IBlockState actualState, World world, Vec3i offsets) {
-        for (BakedQuad quad : quads) {
-            int tintIndex = quad.getTintIndex();
-            int color = tintIndex == -1 ? -1 : blockColors.colorMultiplier(actualState, world, pos, tintIndex);
-            addData(quad.getVertexData(), quad.getSprite(), color, 4, offsets);
-        }
-    }
-
-    private void addData(int[] vertexData, TextureAtlasSprite sprite, int color, int vertCount, @Nullable Vec3i offsets) {
-        String resource = sprite.getIconName();
-
-        String model = color == -1 ? resource : resource + color;
-        HashSet<String> modelsForResource = resourceModelMap.computeIfAbsent(resource, k -> new HashSet<>());
-        modelsForResource.add(model);
-
-        List<Quad> storedQuads = modelQuadsMap.get(model);
-        if (storedQuads == null) {
-            List<Quad> newResourceList = new ArrayList<>();
-            modelQuadsMap.put(model, newResourceList);
-            storedQuads = newResourceList;
-
-            modelSpriteMap.put(model, sprite);
-
-            modelColorMap.put(model, color);
-        }
-
-        storedQuads.addAll(Quad.getQuads(vertexData, sprite, vertCount, offsets));
-    }
-
+    // TODO: build a map<UVBound, resourceName> to write more descriptive file and model names
     public void exportAllData(String objFilenameIn, String mtlFilenameIn) throws IOException {
+        convertQuads();
+        mergeColors();
+
         File baseDir = new File(Minecraft.getMinecraft().mcDataDir, "worldexporter/worlddump" + java.time.LocalDateTime.now().toString().replace(':', '-'));
         String textureDirName = "/t";
         File texturePath = new File(baseDir, textureDirName);
@@ -191,42 +33,58 @@ public class ObjExporter {
         File objFile = new File(baseDir, objFilenameIn);
         File mtlFile = new File(baseDir, mtlFilenameIn);
 
-        int vertices = 1;
-        int textureCoords = 1;
-        try (FileWriter objWriter = new FileWriter(objFile.getPath()); BufferedWriter objbw = new BufferedWriter(objWriter);
-             FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlbw = new BufferedWriter(mtlWriter)) {
+        int verticesCount = 1;
+        int textureUvCount = 1;
+        try (FileWriter objWriter = new FileWriter(objFile.getPath()); BufferedWriter objbw = new BufferedWriter(objWriter, 131072);
+             FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlbw = new BufferedWriter(mtlWriter, 32768)) {
 
             objbw.write("mtllib " + mtlFilenameIn + "\n\n");
 
-            for (String resource : resourceModelMap.keySet()) {
-                for (String modelName : resourceModelMap.get(resource)) {
-                    List<Quad> quadsList = modelQuadsMap.get(modelName);
+            int textureCount = 0;
+            for (UVBounds uvbound : uvColorQuadMap.keySet()) {
+                int colorCount = 0;
 
-                    int splitIndex = modelName.indexOf(':');
-                    String partialTextureFilename = resource.equals("missingno") || splitIndex == -1 ? "missingno.png" : modelName.substring(0, splitIndex) + "/textures/" + modelName.substring(splitIndex + 1)  + ".png";
-                    File fullTextureFilename = new File(texturePath, partialTextureFilename);
+                int width = Math.round(atlasImage.getWidth() * uvbound.uDist());
+                int height = Math.round(atlasImage.getHeight() * uvbound.vDist());
+                int startX = Math.round(atlasImage.getWidth() * uvbound.uMin);
+                int startY = Math.round(atlasImage.getHeight() * uvbound.vMin);
+                BufferedImage textureImg;
+                try {
+                    textureImg = atlasImage.getSubimage(startX, startY, width, height);
+                } catch (RasterFormatException exception) {
+                    logger.warn("Unable to write the texture for uvbounds: " + width + "w, " + height + "h, " + startX + "x, " + startY + "y, " + "with Uv bounds: " + String.join(",", String.valueOf(uvbound.uMin), String.valueOf(uvbound.uMax), String.valueOf(uvbound.vMin), String.valueOf(uvbound.vMax)));
+                    continue;
+                }
+
+                Map<Integer, List<Quad>> colorQuadMap = uvColorQuadMap.get(uvbound);
+                for (int color : colorQuadMap.keySet()) {
+                    List<Quad> quadsForColor = colorQuadMap.get(color);
+                    String modelName = String.valueOf(textureCount) + '-' + colorCount;
+                    File fullTextureFilename = new File(texturePath, modelName + ".png");
+                    BufferedImage coloredTextureImg = color == -1 ? textureImg : tintImage(textureImg, color);
 
                     // write mtl information to .mtl file
                     mtlbw.write("newmtl " + modelName + "\n");
-                    boolean hadTransparency = writeTexture(fullTextureFilename, modelName, modelColorMap.get(modelName));
-                    if (hadTransparency) {
-                        mtlbw.write("map_d " + textureDirName + '/' + partialTextureFilename + '\n');
+                    writeTexture(fullTextureFilename, coloredTextureImg);
+                    try {
+                        if (imageHasTransparency(textureImg)) {
+                            mtlbw.write("map_d " + textureDirName + '/' + modelName + ".png" + '\n');
+                        }
+                    } catch (InterruptedException ignored) {
                     }
-                    mtlbw.write("map_Kd " + textureDirName + '/' + partialTextureFilename + "\n\n");
+                    mtlbw.write("map_Kd " + textureDirName + '/' + modelName + ".png" + "\n\n");
 
                     // write all related quads for that material to .obj file
                     objbw.write("usemtl " + modelName + '\n');
-                    for (Quad quad : quadsList) {
-                        objbw.write(quad.toObj(vertices, textureCoords));
-                        vertices += 4;
-                        textureCoords += 4;
+                    for (Quad quad : quadsForColor) {
+                        objbw.write(quadToObj(quad, verticesCount, textureUvCount, uvbound));
+                        verticesCount += 4;
+                        textureUvCount += 4;
                     }
 
-                    // Model information can now be removed from the maps for garbage collection
-                    modelQuadsMap.remove(modelName);
-                    modelSpriteMap.remove(modelName);
-                    modelColorMap.remove(modelName);
+                    colorCount += 1;
                 }
+                textureCount += 1;
             }
 
         } catch (IOException e) {
@@ -234,15 +92,50 @@ public class ObjExporter {
         }
     }
 
-    // Return value: true if texture has transparency else false
-    private boolean writeTexture(File outputFile, String modelName, int color) {
-        TextureAtlasSprite sprite = modelSpriteMap.get(modelName);
-        BufferedImage textureImg = atlasImage.getSubimage(sprite.getOriginX(), sprite.getOriginY(), sprite.getIconWidth(), sprite.getIconHeight());
+    // TODO: Find a better way to resolve diffuse lighting for block faces
+    //  This is a hacky way to remove the diffuse lighting by merging colors
+    //   with the same tint but different brightness values with the highest brightness one
+    private void mergeColors() {
+//        for (UVBounds uvbound : uvColorQuadMap.keySet()) {
+//            Map<Integer, List<Quad>> colorQuadMap = uvColorQuadMap.get(uvbound);
+//            Set<Integer> colorSet = colorQuadMap.keySet();
+//        }
+    }
 
-        if (color != -1) {
-            textureImg = tintImage(textureImg, color);
+    // Convert the list of quads to the output format
+    private void convertQuads() {
+        for (Quad quad : quads) {
+            Map<Integer, List<Quad>> colorQuadMap = uvColorQuadMap.computeIfAbsent(quad.getUvBounds(), k -> new HashMap<>());
+            List<Quad> quadsForColor = colorQuadMap.computeIfAbsent(quad.getColor(), k -> new ArrayList<>());
+            quadsForColor.add(quad);
+        }
+    }
+
+    // returns a String of relevant .obj file lines that represent the quad
+    private String quadToObj(Quad quad, int vertCount, int uvCount, UVBounds uvBounds) {
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < 4; ++i) {
+            Vertex vertex = quad.getVertices()[i];
+            Vector3f position = vertex.getPosition();
+
+            // scale global texture atlas UV coordinates to single texture image based UV coordinates (and flip the V)
+            Vector2f uv = vertex.getUv();
+            uv.x = (uv.x - uvBounds.uMin) / uvBounds.uDist();
+            uv.y = 1 - ((uv.y - uvBounds.vMin) / uvBounds.vDist());
+
+            result.append("v ").append(position.x).append(' ').append(position.y).append(' ').append(position.z).append('\n');
+            result.append("vt ").append(uv.x).append(' ').append(uv.y).append('\n');
         }
 
+        result.append("f ").append(vertCount).append('/').append(uvCount).append(' ');
+        result.append(vertCount + 1).append('/').append(uvCount + 1).append(' ');
+        result.append(vertCount + 2).append('/').append(uvCount + 2).append(' ');
+        result.append(vertCount + 3).append('/').append(uvCount + 3).append("\n\n");
+
+        return result.toString();
+    }
+
+    private void writeTexture(File outputFile, BufferedImage image) {
         String outputFileStr = outputFile.toString();
         int slashIndex = outputFileStr.lastIndexOf(File.separatorChar);
         slashIndex = slashIndex != -1 ? slashIndex : outputFileStr.length();
@@ -250,45 +143,9 @@ public class ObjExporter {
 
         try {
             Files.createDirectories(new File(fullRelativeDirectory).toPath());
-            ImageIO.write(textureImg, "png", outputFile);
+            ImageIO.write(image, "png", outputFile);
+        } catch (IOException e) {
+            logger.debug("Could not save resource texture: " + outputFile);
         }
-        catch (IOException e) {
-            logger.debug("Could not save resource texture: " + modelName);
-        }
-
-        try {
-            return imageHasTransparency(textureImg);
-        } catch (InterruptedException e) {
-            logger.debug("Could not determine if texture has transparency, defaulting to NO: " + modelName);
-        }
-
-        return false;
-    }
-
-    private BufferedImage tintImage(BufferedImage image, int color) {
-        // https://forge.gemwire.uk/wiki/Tinted_Textures
-        float[] offsets = new float[] {0, 0, 0, 0};
-        float[] rgbaFactors = new float[4];
-        rgbaFactors[0] = ((color >> 16) & 255) / 255.0f;
-        rgbaFactors[1] = ((color >> 8) & 255) / 255.0f;
-        rgbaFactors[2] =  (color & 255) / 255.0f;
-        rgbaFactors[3] = 1.0f;
-        RenderingHints hints = new RenderingHints(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
-        hints.add(new RenderingHints(RenderingHints.KEY_DITHERING, RenderingHints.VALUE_DITHER_DISABLE));
-        return new RescaleOp(rgbaFactors, offsets, hints).filter(image, null);
-    }
-
-    private boolean imageHasTransparency(BufferedImage image) throws InterruptedException {
-        int width = image.getWidth();
-        int height = image.getHeight();
-        int[] pixels = new int[image.getWidth() * image.getHeight()];
-        PixelGrabber pixelGrabber = new PixelGrabber(image, 0, 0, width, height, pixels, 0, width);
-        pixelGrabber.grabPixels();
-        for (int pixel : pixels) {
-            if ((pixel & 0xFF000000) != 0xFF000000) {
-                return true;
-            }
-        }
-        return false;
     }
 }

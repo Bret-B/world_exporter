@@ -17,24 +17,19 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 
-@Mod(modid = WorldExporter.MODID, name = WorldExporter.NAME, version = WorldExporter.VERSION, acceptableRemoteVersions = "*", useMetadata = true)
-public class WorldExporter
-{
+@Mod(modid = WorldExporter.MODID, acceptableRemoteVersions = "*", useMetadata = true)
+public class WorldExporter {
     public static final String MODID = "worldexporter";
-    public static final String NAME = "World Exporter";
-    public static final String VERSION = "0.0.1";
 
     private static Logger logger;
 
     @EventHandler
-    public void preInit(FMLPreInitializationEvent event)
-    {
+    public void preInit(FMLPreInitializationEvent event) {
         logger = event.getModLog();
     }
 
     @EventHandler
-    public void init(FMLInitializationEvent event)
-    {
+    public void init(FMLInitializationEvent event) {
         logger.info("Loading World Exporter");
     }
 
@@ -48,21 +43,20 @@ public class WorldExporter
     public static class WorldExport extends CommandBase {
         @Override
         public void execute(MinecraftServer server, ICommandSender sender, String[] params) throws CommandException {
-             EntityPlayer player = sender.getEntityWorld().getPlayerEntityByName(sender.getName());
+            EntityPlayer player = sender.getEntityWorld().getPlayerEntityByName(sender.getName());
             if (player != null) {
-                ObjExporter exporter = new ObjExporter();
-
-                int radius = 128;
+                int radius = 64;
                 try {
                     radius = params.length > 0 ? Integer.parseInt(params[0]) : 128;
-                } catch (NumberFormatException ignored) { }
+                } catch (NumberFormatException ignored) {
+                }
 
-                exporter.buildObjData(player, radius);
-
+                ObjExporter objExporter = new ObjExporter();
+                objExporter.buildData(player, radius);
                 try {
-                    exporter.exportAllData("world.obj", "world.mtl");
+                    objExporter.exportAllData("world.obj", "world.mtl");
                 } catch (IOException e) {
-                    logger.error("Unable to export .obj/.mtl data");
+                    logger.error("Unable to export world data");
                 }
             }
         }

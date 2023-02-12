@@ -27,4 +27,3 @@ gradle-app.setting
 .gradletasknamecache
 
 *.txt
-!README.txt
