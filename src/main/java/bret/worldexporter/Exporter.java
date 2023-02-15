@@ -67,8 +67,8 @@ public class Exporter {
 
         lowerHeightLimit = lower;
         upperHeightLimit = upper;
-        playerX = (int) Math.round(player.posX);
-        playerZ = (int) Math.round(player.posZ);
+        playerX = (int) player.posX;
+        playerZ = (int) player.posZ;
         startPos = new BlockPos(playerX + radius, upperHeightLimit, playerZ + radius);
         endPos = new BlockPos(playerX - radius, lowerHeightLimit, playerZ - radius);
         world = player.getEntityWorld();

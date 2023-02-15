@@ -17,7 +17,7 @@ def mcversion = '1.12.2'
 
 version = '0.0.3'
 group = 'bret.worldexporter' // http://maven.apache.org/guides/mini/guide-naming-conventions.html
-archivesBaseName = "worldexporter-${version}"
+archivesBaseName = "worldexporter-${mcversion}"
 
 sourceCompatibility = targetCompatibility = compileJava.sourceCompatibility = compileJava.targetCompatibility = '1.8' // Need this here so eclipse task generates correctly.
 

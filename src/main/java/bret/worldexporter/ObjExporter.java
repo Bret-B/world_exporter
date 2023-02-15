@@ -1,8 +1,9 @@
 package bret.worldexporter;
 
-import javafx.util.Pair;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.EntityPlayer;
+import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.commons.lang3.tuple.Pair;
 
 import javax.imageio.ImageIO;
 import javax.vecmath.Vector2f;
@@ -130,7 +131,7 @@ public class ObjExporter extends Exporter {
 
                     Map<Integer, List<Quad>> colorQuadMap = uvColorQuadMap.get(uvbound);
                     for (int color : colorQuadMap.keySet()) {
-                        Pair<Integer, Integer> textureColorPair = new Pair<>(textureId, color);
+                        Pair<Integer, Integer> textureColorPair = new ImmutablePair<>(textureId, color);
                         int colorId;
                         if (textureColorNumberMap.containsKey(textureColorPair)) {
                             colorId = textureColorNumberMap.get(textureColorPair);
