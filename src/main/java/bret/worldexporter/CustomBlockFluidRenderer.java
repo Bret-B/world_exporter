@@ -133,10 +133,10 @@ public class CustomBlockFluidRenderer {
                 int l1 = blockStateIn.getPackedLightmapCoords(blockAccess, blockPosIn.down());
                 int i2 = l1 >> 16 & 65535;
                 int j2 = l1 & 65535;
-                bufferBuilderIn.pos(d0, d1, d2 + 1.0D).color(0.5F, 0.5F, 0.5F, 1.0F).tex((double) f35, (double) f38).lightmap(i2, j2).endVertex();
-                bufferBuilderIn.pos(d0, d1, d2).color(0.5F, 0.5F, 0.5F, 1.0F).tex((double) f35, (double) f37).lightmap(i2, j2).endVertex();
-                bufferBuilderIn.pos(d0 + 1.0D, d1, d2).color(0.5F, 0.5F, 0.5F, 1.0F).tex((double) f36, (double) f37).lightmap(i2, j2).endVertex();
-                bufferBuilderIn.pos(d0 + 1.0D, d1, d2 + 1.0D).color(0.5F, 0.5F, 0.5F, 1.0F).tex((double) f36, (double) f38).lightmap(i2, j2).endVertex();
+                bufferBuilderIn.pos(d0, d1, d2 + 1.0D).color(1.0F, 1.0F, 1.0F, 1.0F).tex((double) f35, (double) f38).lightmap(i2, j2).endVertex();
+                bufferBuilderIn.pos(d0, d1, d2).color(1.0F, 1.0F, 1.0F, 1.0F).tex((double) f35, (double) f37).lightmap(i2, j2).endVertex();
+                bufferBuilderIn.pos(d0 + 1.0D, d1, d2).color(1.0F, 1.0F, 1.0F, 1.0F).tex((double) f36, (double) f37).lightmap(i2, j2).endVertex();
+                bufferBuilderIn.pos(d0 + 1.0D, d1, d2 + 1.0D).color(1.0F, 1.0F, 1.0F, 1.0F).tex((double) f36, (double) f38).lightmap(i2, j2).endVertex();
                 flag3 = true;
             }
 
