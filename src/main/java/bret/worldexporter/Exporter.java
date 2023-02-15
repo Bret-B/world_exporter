@@ -39,6 +39,8 @@ public class Exporter {
     protected final ArrayList<Quad> quads = new ArrayList<>();
     protected static BufferedImage atlasImage;
 
+    private final int lowerHeightLimit;
+    private final int upperHeightLimit;
     private final int playerX;
     private final int playerZ;
     private final BlockPos startPos;
@@ -47,7 +49,7 @@ public class Exporter {
     private int currentX;
     private int currentZ;
 
-    public Exporter(EntityPlayer player, int radius) {
+    public Exporter(EntityPlayer player, int radius, int lower, int upper) {
         // Create entire atlas image as a BufferedImage to be used when exporting
         int textureId = mc.getTextureManager().getTexture(new ResourceLocation("minecraft", "textures/atlas/blocks.png")).getGlTextureId();
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, textureId);
@@ -63,10 +65,12 @@ public class Exporter {
         buffer.get(data);
         atlasImage.setRGB(0, 0, atlasWidth, atlasHeight, data, 0, atlasWidth);
 
+        lowerHeightLimit = lower;
+        upperHeightLimit = upper;
         playerX = (int) Math.round(player.posX);
         playerZ = (int) Math.round(player.posZ);
-        startPos = new BlockPos(playerX + radius, 255, playerZ + radius);
-        endPos = new BlockPos(playerX - radius, 0, playerZ - radius);
+        startPos = new BlockPos(playerX + radius, upperHeightLimit, playerZ + radius);
+        endPos = new BlockPos(playerX - radius, lowerHeightLimit, playerZ - radius);
         world = player.getEntityWorld();
         currentX = startPos.getX();
         currentZ = startPos.getZ();
@@ -183,8 +187,8 @@ public class Exporter {
         // ((a % b) + b) % b gives true modulus instead of just remainder
         int chunkXOffset = ((currentX % 16) + 16) % 16;
         int chunkZOffset = ((currentZ % 16) + 16) % 16;
-        BlockPos thisChunkStart = new BlockPos(currentX, 255, currentZ);
-        BlockPos thisChunkEnd = new BlockPos(Math.max(currentX - chunkXOffset, endPos.getX()), 60, Math.max(currentZ - chunkZOffset, endPos.getZ()));
+        BlockPos thisChunkStart = new BlockPos(currentX, upperHeightLimit, currentZ);
+        BlockPos thisChunkEnd = new BlockPos(Math.max(currentX - chunkXOffset, endPos.getX()), lowerHeightLimit, Math.max(currentZ - chunkZOffset, endPos.getZ()));
 
         for (BlockPos pos : BlockPos.getAllInBoxMutable(thisChunkStart, thisChunkEnd)) {
             IBlockState state = world.getBlockState(pos).getActualState(world, pos);

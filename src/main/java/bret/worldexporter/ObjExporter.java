@@ -20,10 +20,9 @@ public class ObjExporter extends Exporter {
     // A set of UV bounds uniquely identifies a texture, then an integer color for the texture identifies a list of related quads
     private final Map<UVBounds, Map<Integer, List<Quad>>> uvColorQuadMap = new HashMap<>();
 
-    public ObjExporter(EntityPlayer player, int radius) {
-        super(player, radius);
+    public ObjExporter(EntityPlayer player, int radius, int lower, int upper) {
+        super(player, radius, lower, upper);
     }
-
 
     // TODO: Find a better way to resolve diffuse lighting for block faces
     //  This is a hacky way to remove the diffuse lighting by merging colors

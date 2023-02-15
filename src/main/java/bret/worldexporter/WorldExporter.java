@@ -50,7 +50,17 @@ public class WorldExporter {
                 } catch (NumberFormatException ignored) {
                 }
 
-                ObjExporter objExporter = new ObjExporter(player, radius);
+                int lower = 0;
+                int upper = 255;
+                if (params.length >= 3) {
+                    try {
+                        lower = Integer.parseInt(params[1]);
+                        upper = Integer.parseInt(params[2]);
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+
+                ObjExporter objExporter = new ObjExporter(player, radius, lower, upper);
                 try {
                     objExporter.export("world.obj", "world.mtl");
                 } catch (IOException e) {
