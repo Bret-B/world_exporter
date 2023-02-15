@@ -11,9 +11,10 @@ public class Quad {
     }
 
     public void addVertex(Vertex vertex) {
-        if (count < 4) {
-            vertices[count++] = vertex;
+        if (count >= 4) {
+            throw new IllegalStateException("Quad already has 4 vertices");
         }
+        vertices[count++] = vertex;
     }
 
     public Vertex[] getVertices() {
@@ -26,7 +27,7 @@ public class Quad {
 
     public UVBounds getUvBounds() {
         if (count < 4) {
-            throw new IllegalStateException();
+            throw new IllegalStateException("Quad does not yet have 4 vertices");
         }
 
         UVBounds bounds = new UVBounds();

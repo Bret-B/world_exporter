@@ -50,13 +50,11 @@ public class WorldExporter {
                 } catch (NumberFormatException ignored) {
                 }
 
-                ObjExporter objExporter = new ObjExporter();
-                objExporter.buildData(player, radius);
+                ObjExporter objExporter = new ObjExporter(player, radius);
                 try {
-                    objExporter.exportAllData("world.obj", "world.mtl");
+                    objExporter.export("world.obj", "world.mtl");
                 } catch (IOException e) {
                     logger.error("Unable to export world data");
-
                 }
             }
         }

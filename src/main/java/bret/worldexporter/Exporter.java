@@ -3,6 +3,7 @@ package bret.worldexporter;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.BufferBuilder;
+import net.minecraft.client.renderer.RegionRenderCacheBuilder;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.client.renderer.vertex.VertexFormat;
 import net.minecraft.client.renderer.vertex.VertexFormatElement;
@@ -20,13 +21,11 @@ import org.lwjgl.opengl.GL12;
 
 import javax.vecmath.Vector2f;
 import javax.vecmath.Vector3f;
-import java.awt.*;
 import java.awt.image.BufferedImage;
-import java.awt.image.PixelGrabber;
-import java.awt.image.RescaleOp;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
@@ -34,12 +33,21 @@ import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 public class Exporter {
     protected final Minecraft mc = Minecraft.getMinecraft();
     protected final CustomBlockRendererDispatcher blockRenderer = new CustomBlockRendererDispatcher(mc.getBlockRendererDispatcher().getBlockModelShapes(), mc.getBlockColors());
+    protected final RegionRenderCacheBuilder renderCacheBuilder = new RegionRenderCacheBuilder();
+    protected final boolean[] startedBufferBuilders = new boolean[BlockRenderLayer.values().length];
     protected final static Logger logger = LogManager.getLogger(WorldExporter.MODID);
-
     protected final ArrayList<Quad> quads = new ArrayList<>();
     protected static BufferedImage atlasImage;
 
-    public Exporter() {
+    private final int playerX;
+    private final int playerZ;
+    private final BlockPos startPos;
+    private final BlockPos endPos;
+    private final IBlockAccess world;
+    private int currentX;
+    private int currentZ;
+
+    public Exporter(EntityPlayer player, int radius) {
         // Create entire atlas image as a BufferedImage to be used when exporting
         int textureId = mc.getTextureManager().getTexture(new ResourceLocation("minecraft", "textures/atlas/blocks.png")).getGlTextureId();
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, textureId);
@@ -54,70 +62,17 @@ public class Exporter {
         GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, GL12.GL_BGRA, GL12.GL_UNSIGNED_INT_8_8_8_8_REV, buffer);
         buffer.get(data);
         atlasImage.setRGB(0, 0, atlasWidth, atlasHeight, data, 0, atlasWidth);
+
+        playerX = (int) Math.round(player.posX);
+        playerZ = (int) Math.round(player.posZ);
+        startPos = new BlockPos(playerX + radius, 255, playerZ + radius);
+        endPos = new BlockPos(playerX - radius, 0, playerZ - radius);
+        world = player.getEntityWorld();
+        currentX = startPos.getX();
+        currentZ = startPos.getZ();
     }
 
-    public void buildData(EntityPlayer player, int radius) {
-        CustomRegionRenderCacheBuilder renderCacheBuilder = new CustomRegionRenderCacheBuilder(radius);
-        boolean[] startedBufferBuilders = new boolean[BlockRenderLayer.values().length];
-
-        int playerX = (int) Math.round(player.posX);
-        int playerZ = (int) Math.round(player.posZ);
-
-        IBlockAccess world = player.getEntityWorld();
-        BlockPos startPos = new BlockPos(playerX + radius, 255, playerZ + radius);
-        BlockPos endPos = new BlockPos(playerX - radius, 0, playerZ - radius);
-
-
-        // Set bufferbuilder offsets
-        for (BlockRenderLayer blockRenderLayer : BlockRenderLayer.values()) {
-            int blockRenderLayerId = blockRenderLayer.ordinal();
-            BufferBuilder bufferBuilder = renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId);
-            bufferBuilder.setTranslation(playerX, 0, playerZ);
-        }
-
-        for (BlockPos pos : BlockPos.getAllInBoxMutable(startPos, endPos)) {
-            IBlockState state = world.getBlockState(pos).getActualState(world, pos);
-            if (state.getBlock().isAir(state, world, pos)) {
-                continue;
-            }
-
-            for (BlockRenderLayer blockRenderLayer : BlockRenderLayer.values()) {
-                if (!state.getBlock().canRenderInLayer(state, blockRenderLayer)) {
-                    continue;
-                }
-
-                ForgeHooksClient.setRenderLayer(blockRenderLayer);
-                int blockRenderLayerId = blockRenderLayer.ordinal();
-                BufferBuilder bufferBuilder = renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId);
-
-                if (!startedBufferBuilders[blockRenderLayerId]) {
-                    startedBufferBuilders[blockRenderLayerId] = true;
-                    bufferBuilder.begin(GL11.GL_QUADS, DefaultVertexFormats.BLOCK);
-                }
-
-                // OptiFine Shaders compatibility -- https://gist.github.com/Cadiboo/753607e41ca4e2ca9e0ce3b928bab5ef
-//				if (Config.isShaders()) SVertexBuilder.pushEntity(state, pos, blockAccess, bufferBuilder);
-                try {
-                    blockRenderer.renderBlock(state, pos, world, bufferBuilder);
-                } catch (Exception ignored) {
-                }
-//				if (Config.isShaders()) SVertexBuilder.popEntity(bufferBuilder);
-            }
-            ForgeHooksClient.setRenderLayer(null);
-        }
-
-        for (int blockRenderLayerId = 0; blockRenderLayerId < startedBufferBuilders.length; ++blockRenderLayerId) {
-            if (!startedBufferBuilders[blockRenderLayerId]) {
-                continue;
-            }
-
-            renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId).finishDrawing();
-        }
-
-        addBuilderData(renderCacheBuilder);
-    }
-
-    private void addBuilderData(CustomRegionRenderCacheBuilder renderCacheBuilder) {
+    protected void addBuilderData(RegionRenderCacheBuilder renderCacheBuilder) {
         for (int blockRenderLayerId = 0; blockRenderLayerId < BlockRenderLayer.values().length; ++blockRenderLayerId) {
             BufferBuilder bufferBuilder = renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId);
             int vertexCount = bufferBuilder.getVertexCount();
@@ -171,6 +126,7 @@ public class Exporter {
                                         // Check for NaNs
                                         if (u != u || v != v) {
                                             skipQuad = true;
+                                            logger.warn("Quad being skipped since a vertex had a UV coordinate of NaN.");
                                             break;
                                         }
 
@@ -179,7 +135,7 @@ public class Exporter {
                                     case SHORT:
                                         // TODO: ensure value / 16 / (2^16 - 1) gives proper 0-1 float range
                                         //  Minecraft.getMinecraft().getTextureManager().getTexture(new ResourceLocation( "minecraft", "dynamic/lightmap_1"))
-                                        //  Discard first short (sky light) and only use second (block light)?
+                                        //  Discard first short (sky light) and only use second (block light) when implementing emissive lighting?
                                         vertex.setUvlight(new Vector2f(bytebuffer.getShort() / 65520.0f, bytebuffer.getShort() / 65520.0f));
                                         break;
                                     default:
@@ -197,34 +153,88 @@ public class Exporter {
 
                     quad.addVertex(vertex);
                 }
+
+                // add the last quad
+                if (quad.getCount() == 4 && !skipQuad) {
+                    quads.add(quad);
+                }
             }
         }
     }
 
-    protected BufferedImage tintImage(BufferedImage image, int color) {
-        // https://forge.gemwire.uk/wiki/Tinted_Textures
-        float[] offsets = new float[]{0, 0, 0, 0};
-        float[] rgbaFactors = new float[4];
-        rgbaFactors[0] = (color & 255) / 255.0f;
-        rgbaFactors[1] = ((color >> 8) & 255) / 255.0f;
-        rgbaFactors[2] = ((color >> 16) & 255) / 255.0f;
-        rgbaFactors[3] = 1.0f;
-        RenderingHints hints = new RenderingHints(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
-        hints.add(new RenderingHints(RenderingHints.KEY_DITHERING, RenderingHints.VALUE_DITHER_DISABLE));
-        return new RescaleOp(rgbaFactors, offsets, hints).filter(image, null);
+    // Resets bufferBuilders and offsets
+    protected void resetBuilders() {
+        Arrays.fill(startedBufferBuilders, false);
+        for (BlockRenderLayer blockRenderLayer : BlockRenderLayer.values()) {
+            int blockRenderLayerId = blockRenderLayer.ordinal();
+            BufferBuilder bufferBuilder = renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId);
+            bufferBuilder.setTranslation(-playerX, 0, -playerZ);
+            bufferBuilder.reset();
+        }
     }
 
-    protected boolean imageHasTransparency(BufferedImage image) throws InterruptedException {
-        int width = image.getWidth();
-        int height = image.getHeight();
-        int[] pixels = new int[image.getWidth() * image.getHeight()];
-        PixelGrabber pixelGrabber = new PixelGrabber(image, 0, 0, width, height, pixels, 0, width);
-        pixelGrabber.grabPixels();
-        for (int pixel : pixels) {
-            if ((pixel & 0xFF000000) != 0xFF000000) {
-                return true;
-            }
+    public boolean getNextChunkData() {
+        if (currentX < endPos.getX() || currentZ < endPos.getZ()) {
+            return false;
         }
-        return false;
+
+        resetBuilders();
+
+        // ((a % b) + b) % b gives true modulus instead of just remainder
+        int chunkXOffset = ((currentX % 16) + 16) % 16;
+        int chunkZOffset = ((currentZ % 16) + 16) % 16;
+        BlockPos thisChunkStart = new BlockPos(currentX, 255, currentZ);
+        BlockPos thisChunkEnd = new BlockPos(Math.max(currentX - chunkXOffset, endPos.getX()), 60, Math.max(currentZ - chunkZOffset, endPos.getZ()));
+
+        for (BlockPos pos : BlockPos.getAllInBoxMutable(thisChunkStart, thisChunkEnd)) {
+            IBlockState state = world.getBlockState(pos).getActualState(world, pos);
+            if (state.getBlock().isAir(state, world, pos)) {
+                continue;
+            }
+
+            for (BlockRenderLayer blockRenderLayer : BlockRenderLayer.values()) {
+                if (!state.getBlock().canRenderInLayer(state, blockRenderLayer)) {
+                    continue;
+                }
+
+                ForgeHooksClient.setRenderLayer(blockRenderLayer);
+                int blockRenderLayerId = blockRenderLayer.ordinal();
+                BufferBuilder bufferBuilder = renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId);
+
+                if (!startedBufferBuilders[blockRenderLayerId]) {
+                    startedBufferBuilders[blockRenderLayerId] = true;
+                    bufferBuilder.begin(GL11.GL_QUADS, DefaultVertexFormats.BLOCK);
+                }
+
+                // OptiFine Shaders compatibility -- https://gist.github.com/Cadiboo/753607e41ca4e2ca9e0ce3b928bab5ef
+//				if (Config.isShaders()) SVertexBuilder.pushEntity(state, pos, blockAccess, bufferBuilder);
+                try {
+                    blockRenderer.renderBlock(state, pos, world, bufferBuilder);
+                } catch (Exception exception) {
+                    logger.warn("Unable to render block: " + state.getBlock() + "      with position: " + pos);
+                }
+//				if (Config.isShaders()) SVertexBuilder.popEntity(bufferBuilder);
+            }
+            ForgeHooksClient.setRenderLayer(null);
+        }
+
+        for (int blockRenderLayerId = 0; blockRenderLayerId < startedBufferBuilders.length; ++blockRenderLayerId) {
+            if (!startedBufferBuilders[blockRenderLayerId]) {
+                continue;
+            }
+            renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId).finishDrawing();
+        }
+
+        addBuilderData(renderCacheBuilder);
+
+        // Update the current position to be the starting position of the next chunk export (which may be
+        // outside the selected boundary, accounted for at the beginning of the function call).
+        currentX -= (thisChunkStart.getX() - thisChunkEnd.getX() + 1);
+        if (currentX < endPos.getX()) {
+            currentX = startPos.getX();
+            currentZ -= (thisChunkStart.getZ() - thisChunkEnd.getZ() + 1);
+        }
+
+        return true;
     }
 }

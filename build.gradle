@@ -13,7 +13,7 @@ apply plugin: 'net.minecraftforge.gradle'
 apply plugin: 'eclipse'
 apply plugin: 'maven-publish'
 
-version = '0.0.2'
+version = '0.0.3'
 group = 'bret.worldexporter' // http://maven.apache.org/guides/mini/guide-naming-conventions.html
 archivesBaseName = 'worldexporter'
 
@@ -114,3 +114,22 @@ publishing {
         }
     }
 }
+
+apply plugin: 'idea'
+idea {
+    module {
+        inheritOutputDirs = true
+    }
+}
+subprojects {
+    apply plugin: 'idea'
+}
+
+tasks.register('prepareAssets', Copy) {
+    group = 'build'
+    from project.file('src/main/resources')
+    into project.file('build/classes/java/main')
+}
+
+classes.dependsOn(prepareAssets)
+
