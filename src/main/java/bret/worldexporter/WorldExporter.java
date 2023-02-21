@@ -52,12 +52,10 @@ public class WorldExporter {
 
                 int lower = 0;
                 int upper = 255;
-                if (params.length >= 3) {
-                    try {
-                        lower = Integer.parseInt(params[1]);
-                        upper = Integer.parseInt(params[2]);
-                    } catch (NumberFormatException ignored) {
-                    }
+                try {
+                    lower = params.length >= 2 ? Integer.parseInt(params[1]) : lower;
+                    upper = params.length >= 3 ? Integer.parseInt(params[2]) : upper;
+                } catch (NumberFormatException ignored) {
                 }
 
                 ObjExporter objExporter = new ObjExporter(player, radius, lower, upper);

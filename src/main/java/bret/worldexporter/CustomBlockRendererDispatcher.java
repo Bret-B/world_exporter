@@ -20,7 +20,7 @@ public class CustomBlockRendererDispatcher {
 
     private final BlockModelShapes blockModelShapes;
     private final CustomBlockModelRenderer blockModelRenderer;
-    public final CustomBlockFluidRenderer fluidRenderer;
+    private final CustomBlockFluidRenderer fluidRenderer;
 
     public CustomBlockRendererDispatcher(BlockModelShapes p_i46577_1_, BlockColors p_i46577_2_) {
         this.blockModelShapes = p_i46577_1_;

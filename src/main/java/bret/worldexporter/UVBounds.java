@@ -8,6 +8,16 @@ public class UVBounds {
     public float vMin;
     public float vMax;
 
+    public UVBounds() {
+    }
+
+    public UVBounds(UVBounds other) {
+        this.uMin = other.uMin;
+        this.uMax = other.uMax;
+        this.vMin = other.vMin;
+        this.vMax = other.vMax;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

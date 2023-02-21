@@ -13,20 +13,20 @@ import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.IBlockAccess;
 import net.minecraftforge.client.ForgeHooksClient;
+import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
+import org.lwjgl.util.vector.Vector2f;
+import org.lwjgl.util.vector.Vector3f;
 
-import javax.vecmath.Vector2f;
-import javax.vecmath.Vector3f;
 import java.awt.image.BufferedImage;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
@@ -35,9 +35,10 @@ public class Exporter {
     protected final CustomBlockRendererDispatcher blockRenderer = new CustomBlockRendererDispatcher(mc.getBlockRendererDispatcher().getBlockModelShapes(), mc.getBlockColors());
     protected final RegionRenderCacheBuilder renderCacheBuilder = new RegionRenderCacheBuilder();
     protected final boolean[] startedBufferBuilders = new boolean[BlockRenderLayer.values().length];
-    protected final static Logger logger = LogManager.getLogger(WorldExporter.MODID);
-    protected final ArrayList<Quad> quads = new ArrayList<>();
-    protected static BufferedImage atlasImage;
+    protected final BufferedImage atlasImage;
+    protected final Map<BlockRenderLayer, Map<BlockPos, Pair<Integer, Integer>>> layerPosVerticesMap = new HashMap<>();
+    protected final Map<BlockPos, ArrayList<Quad>> blockQuadsMap = new HashMap<>();
+    protected static final Logger logger = LogManager.getLogger(WorldExporter.MODID);
 
     private final int lowerHeightLimit;
     private final int upperHeightLimit;
@@ -79,30 +80,40 @@ public class Exporter {
     protected void addBuilderData(RegionRenderCacheBuilder renderCacheBuilder) {
         for (int blockRenderLayerId = 0; blockRenderLayerId < BlockRenderLayer.values().length; ++blockRenderLayerId) {
             BufferBuilder bufferBuilder = renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId);
-            int vertexCount = bufferBuilder.getVertexCount();
-            if (vertexCount > 0) {
-                VertexFormat vertexFormat = bufferBuilder.getVertexFormat();
-                ByteBuffer bytebuffer = bufferBuilder.getByteBuffer();
-                List<VertexFormatElement> list = vertexFormat.getElements();
+            if (bufferBuilder.getVertexCount() == 0) {
+                continue;
+            }
+            VertexFormat vertexFormat = bufferBuilder.getVertexFormat();
+            int vertexByteSize = vertexFormat.getIntegerSize() * 4;
+            ByteBuffer bytebuffer = bufferBuilder.getByteBuffer();
+            List<VertexFormatElement> list = vertexFormat.getElements();
 
-                Quad quad = new Quad();
+            for (BlockPos pos : layerPosVerticesMap.get(BlockRenderLayer.values()[blockRenderLayerId]).keySet()) {
+                Pair<Integer, Integer> verticesPosCount = layerPosVerticesMap.get(BlockRenderLayer.values()[blockRenderLayerId]).get(pos);
+                int firstVertexBytePos = verticesPosCount.getLeft() * vertexByteSize;
+                int vertexCount = verticesPosCount.getRight();
+
+                if (vertexCount == 0) {
+                    continue;
+                }
+
+                Quad quad = new Quad(BlockRenderLayer.values()[blockRenderLayerId]);
                 boolean skipQuad = false;
+                bytebuffer.position(firstVertexBytePos);
                 for (int vertexNum = 0; vertexNum < vertexCount; ++vertexNum) {
                     if (quad.getCount() == 4) {
                         if (skipQuad) {
-                            quad = new Quad();
+                            quad = new Quad(BlockRenderLayer.values()[blockRenderLayerId]);
                             skipQuad = false;
                         } else {
-                            quads.add(quad);
-                            quad = new Quad();
+                            blockQuadsMap.computeIfAbsent(pos, k -> new ArrayList<>()).add(quad);
+                            quad = new Quad(BlockRenderLayer.values()[blockRenderLayerId]);
                         }
                     }
 
                     Vertex vertex = new Vertex();
-                    for (int elementIndex = 0; !skipQuad && elementIndex < list.size(); ++elementIndex) {
-                        VertexFormatElement vertexFormatElement = list.get(elementIndex);
+                    for (VertexFormatElement vertexFormatElement : list) {
                         VertexFormatElement.EnumUsage vertexElementEnumUsage = vertexFormatElement.getUsage();
-
                         switch (vertexElementEnumUsage) {
                             case POSITION:
                                 if (vertexFormatElement.getType() == VertexFormatElement.EnumType.FLOAT) {
@@ -134,6 +145,12 @@ public class Exporter {
                                             break;
                                         }
 
+                                        if (u > 1.0f || u < 0 || v > 1.0f || v < 0) {
+                                            skipQuad = true;
+                                            logger.warn("Quad being skipped because UV was out of bounds on add.");
+                                            break;
+                                        }
+
                                         vertex.setUv(new Vector2f(u, v));
                                         break;
                                     case SHORT:
@@ -160,13 +177,13 @@ public class Exporter {
 
                 // add the last quad
                 if (quad.getCount() == 4 && !skipQuad) {
-                    quads.add(quad);
+                    blockQuadsMap.computeIfAbsent(pos, k -> new ArrayList<>()).add(quad);
                 }
             }
         }
     }
 
-    // Resets bufferBuilders and offsets
+    // Resets bufferBuilders, offsets, and all internal quad lists
     protected void resetBuilders() {
         Arrays.fill(startedBufferBuilders, false);
         for (BlockRenderLayer blockRenderLayer : BlockRenderLayer.values()) {
@@ -175,6 +192,9 @@ public class Exporter {
             bufferBuilder.setTranslation(-playerX, 0, -playerZ);
             bufferBuilder.reset();
         }
+
+        layerPosVerticesMap.clear();
+        blockQuadsMap.clear();
     }
 
     public boolean getNextChunkData() {
@@ -213,9 +233,13 @@ public class Exporter {
                 // OptiFine Shaders compatibility -- https://gist.github.com/Cadiboo/753607e41ca4e2ca9e0ce3b928bab5ef
 //				if (Config.isShaders()) SVertexBuilder.pushEntity(state, pos, blockAccess, bufferBuilder);
                 try {
-                    blockRenderer.renderBlock(state, pos, world, bufferBuilder);
+                    int vertexCountPre = bufferBuilder.getVertexCount();
+                    if (blockRenderer.renderBlock(state, pos, world, bufferBuilder)) {
+                        int addedVertexCount = bufferBuilder.getVertexCount() - vertexCountPre;
+                        layerPosVerticesMap.computeIfAbsent(blockRenderLayer, k -> new HashMap<>()).put(pos.toImmutable(), new ImmutablePair<>(vertexCountPre, addedVertexCount));
+                    }
                 } catch (Exception exception) {
-                    logger.warn("Unable to render block: " + state.getBlock() + "      with position: " + pos);
+                    logger.warn("Unable to render block: " + state.getBlock() + "      with position: " + pos + "\n" + exception);
                 }
 //				if (Config.isShaders()) SVertexBuilder.popEntity(bufferBuilder);
             }

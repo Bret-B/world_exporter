@@ -1,7 +1,9 @@
 package bret.worldexporter;
 
-import javax.vecmath.Vector2f;
-import javax.vecmath.Vector3f;
+import org.lwjgl.util.vector.Vector2f;
+import org.lwjgl.util.vector.Vector3f;
+
+import java.util.Objects;
 
 public class Vertex {
     private Vector3f position;
@@ -10,6 +12,13 @@ public class Vertex {
     private int color = -1;
 
     public Vertex() {
+    }
+
+    public Vertex(Vertex other) {
+        this.position = new Vector3f(other.position);
+        this.uv = new Vector2f(other.uv);
+        this.uvlight = new Vector2f(other.uvlight);
+        this.color = other.color;
     }
 
     public void setPosition(Vector3f position) {
@@ -54,5 +63,18 @@ public class Vertex {
 
     public boolean hasUvlight() {
         return uvlight != null;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Vertex vertex = (Vertex) o;
+        return color == vertex.color && position.equals(vertex.position) && uv.equals(vertex.uv) && uvlight.equals(vertex.uvlight);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(position, uv, uvlight, color);
     }
 }

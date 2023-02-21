@@ -2,12 +2,13 @@ package bret.worldexporter;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.util.BlockRenderLayer;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
+import org.lwjgl.util.vector.Vector2f;
+import org.lwjgl.util.vector.Vector3f;
 
 import javax.imageio.ImageIO;
-import javax.vecmath.Vector2f;
-import javax.vecmath.Vector3f;
 import java.awt.image.BufferedImage;
 import java.awt.image.RasterFormatException;
 import java.io.BufferedWriter;
@@ -18,34 +19,85 @@ import java.nio.file.Files;
 import java.util.*;
 
 public class ObjExporter extends Exporter {
-    // A set of UV bounds uniquely identifies a texture, then an integer color for the texture identifies a list of related quads
-    private final Map<UVBounds, Map<Integer, List<Quad>>> uvColorQuadMap = new HashMap<>();
+    private final ArrayList<Quad> allQuads = new ArrayList<>();
+    private final Map<UVBounds, Float> uvTransparencyCache = new HashMap<>();
+    private final Comparator<Quad> quadComparator = getQuadSort();
 
     public ObjExporter(EntityPlayer player, int radius, int lower, int upper) {
         super(player, radius, lower, upper);
     }
 
-    // TODO: Find a better way to resolve diffuse lighting for block faces
-    //  This is a hacky way to remove the diffuse lighting by merging colors
-    //   with the same tint but different brightness values with the highest brightness one
-//    private void mergeColors() {
-//        for (UVBounds uvbound : uvColorQuadMap.keySet()) {
-//            Map<Integer, List<Quad>> colorQuadMap = uvColorQuadMap.get(uvbound);
-//            Set<Integer> colorSet = colorQuadMap.keySet();
-//        }
-//    }
+    private void removeDuplicateQuads() {
+        for (ArrayList<Quad> quads : blockQuadsMap.values()) {
+            Set<Integer> added = new HashSet<>();
+            ArrayList<Quad> uniqueQuads = new ArrayList<>();
+            for (int i = 0; i < quads.size(); ++i) {
+                if (added.contains(i)) {
+                    continue;
+                }
 
-    // Convert the list of quads to a usable output format
-    private void convertQuads() {
-        for (Quad quad : quads) {
-            Map<Integer, List<Quad>> colorQuadMap = uvColorQuadMap.computeIfAbsent(quad.getUvBounds(), k -> new HashMap<>());
-            List<Quad> quadsForColor = colorQuadMap.computeIfAbsent(quad.getColor(), k -> new ArrayList<>());
-            quadsForColor.add(quad);
+                Quad q1 = quads.get(i);
+                uniqueQuads.add(q1);
+                added.add(i);
+
+                for (int j = i + 1; j < quads.size(); ++j) {
+                    if (added.contains(j)) {
+                        continue;
+                    }
+
+                    if (q1.isEquivalentTo(quads.get(j))) {
+                        added.add(j);  // treat the quad as already added since it is equivalent to one that has already been added
+                    }
+                }
+            }
+
+            quads.clear();
+            quads.addAll(uniqueQuads);
+        }
+    }
+
+    // update any quads that overlap by translating by a small multiple of their normal
+    private void fixOverlaps() {
+        removeDuplicateQuads();
+        for (ArrayList<Quad> quads : blockQuadsMap.values()) {
+            sortQuads(quads);
+            Set<Integer> toCheck = new HashSet<>();
+            for (int i = 0, size = quads.size(); i < size; ++i) {
+                toCheck.add(i);
+            }
+            boolean reCheck = !toCheck.isEmpty();
+            while (reCheck) {
+                Set<Integer> newToCheck = new HashSet<>();
+                for (int quadIndex : toCheck) {
+                    Quad first = quads.get(quadIndex);
+                    ArrayList<Integer> overlapsWithFirst = new ArrayList<>();
+                    for (int j = quadIndex + 1; j < quads.size(); ++j) {
+                        if (first.overlaps(quads.get(j))) {
+                            overlapsWithFirst.add(j);
+                        }
+                    }
+
+                    if (overlapsWithFirst.isEmpty()) {
+                        continue;
+                    }
+
+                    Vector3f posTranslate = (Vector3f) first.getNormal().scale(0.0005f);
+                    for (int overlapQuad : overlapsWithFirst) {
+                        quads.get(overlapQuad).translate(posTranslate);
+                        newToCheck.add(overlapQuad);
+                    }
+                }
+
+                reCheck = !newToCheck.isEmpty();
+                toCheck = newToCheck;
+            }
+
+            allQuads.addAll(quads);
         }
     }
 
     // returns a String of relevant .obj file lines that represent the quad
-    private String quadToObj(Quad quad, int vertCount, int uvCount, UVBounds uvBounds) {
+    private String quadToObj(Quad quad, int vertCount, int uvCount) {
         StringBuilder result = new StringBuilder();
         for (int i = 0; i < 4; ++i) {
             Vertex vertex = quad.getVertices()[i];
@@ -53,6 +105,7 @@ public class ObjExporter extends Exporter {
 
             // scale global texture atlas UV coordinates to single texture image based UV coordinates (and flip the V)
             Vector2f uv = vertex.getUv();
+            UVBounds uvBounds = quad.getUvBounds();
             uv.x = (uv.x - uvBounds.uMin) / uvBounds.uDist();
             uv.y = 1 - ((uv.y - uvBounds.vMin) / uvBounds.vDist());
 
@@ -92,96 +145,103 @@ public class ObjExporter extends Exporter {
 
         int verticesCount = 1;
         int textureUvCount = 1;
-        int textureCount = 0;
-        Map<Integer, Integer> colorCounts = new HashMap<>();
-        // Maps a UV bound to the associated texture number
-        Map<UVBounds, Integer> uvTextureNumberMap = new HashMap<>();
-        // Maps a pair of (int texture, int color) to the associated color number
-        Map<Pair<Integer, Integer>, Integer> textureColorNumberMap = new HashMap<>();
-        // Maps a texture ID to the amount of colors it has
-        Set<String> savedMaterials = new HashSet<>();
+        int modelCount = 0;
+        Map<Pair<UVBounds, Integer>, Integer> modelToIdMap = new HashMap<>();
         try (FileWriter objWriter = new FileWriter(objFile.getPath()); BufferedWriter objbw = new BufferedWriter(objWriter, 32 * (int) Math.pow(2, 20));
              FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlbw = new BufferedWriter(mtlWriter, (int) Math.pow(2, 10))) {
             objbw.write("mtllib " + mtlFilenameIn + "\n\n");
 
             while (getNextChunkData()) {
-                convertQuads();
-//                mergeColors();
-                for (UVBounds uvbound : uvColorQuadMap.keySet()) {
-                    int width = Math.round(atlasImage.getWidth() * uvbound.uDist());
-                    int height = Math.round(atlasImage.getHeight() * uvbound.vDist());
-                    int startX = Math.round(atlasImage.getWidth() * uvbound.uMin);
-                    int startY = Math.round(atlasImage.getHeight() * uvbound.vMin);
-                    BufferedImage textureImg;
-                    try {
-                        textureImg = atlasImage.getSubimage(startX, startY, width, height);
-                    } catch (RasterFormatException exception) {
-                        logger.warn("Unable to get the texture for uvbounds: " + width + "w, " + height + "h, " + startX + "x, " + startY + "y, " + "with Uv bounds: " +
-                                String.join(",", String.valueOf(uvbound.uMin), String.valueOf(uvbound.uMax), String.valueOf(uvbound.vMin), String.valueOf(uvbound.vMax)));
+                fixOverlaps();
+                Map<Integer, ArrayList<Quad>> quadsForModel = new HashMap<>();
+                for (Quad quad : allQuads) {
+                    Pair<UVBounds, Integer> model = new ImmutablePair<>(quad.getUvBounds(), quad.getColor());
+
+                    int modelId;
+                    if (!modelToIdMap.containsKey(model)) {
+                        BufferedImage image = getImageFromUV(quad.getUvBounds(), quad.getColor());
+                        if (image == null || ImgUtils.isCompletelyTransparent(image)) {
+                            modelToIdMap.put(model, -1);
+                            continue;
+                        }
+
+                        modelId = modelCount++;
+                        modelToIdMap.put(model, modelId);
+
+                        File fullTextureFilename = new File(texturePath, modelId + ".png");
+                        writeTexture(fullTextureFilename, image);
+
+                        // write material information to .mtl file
+                        mtlbw.write("newmtl " + modelId + "\n");
+                        try {
+                            if (ImgUtils.imageHasTransparency(image)) {
+                                mtlbw.write("map_d " + textureDirName + '/' + modelId + ".png" + '\n');
+                            }
+                        } catch (InterruptedException ignored) {
+                        }
+                        mtlbw.write("map_Kd " + textureDirName + '/' + modelId + ".png" + "\n\n");
+                    } else {
+                        modelId = modelToIdMap.get(model);
+                    }
+
+                    if (modelId == -1) {
                         continue;
                     }
 
-                    int textureId;
-                    if (uvTextureNumberMap.containsKey(uvbound)) {
-                        textureId = uvTextureNumberMap.get(uvbound);
-                    } else {
-                        textureId = textureCount++;
-                        uvTextureNumberMap.put(uvbound, textureId);
-                    }
+                    quadsForModel.computeIfAbsent(modelId, k -> new ArrayList<>()).add(quad);
+                }
 
-                    Map<Integer, List<Quad>> colorQuadMap = uvColorQuadMap.get(uvbound);
-                    for (int color : colorQuadMap.keySet()) {
-                        Pair<Integer, Integer> textureColorPair = new ImmutablePair<>(textureId, color);
-                        int colorId;
-                        if (textureColorNumberMap.containsKey(textureColorPair)) {
-                            colorId = textureColorNumberMap.get(textureColorPair);
-                        } else {
-                            if (colorCounts.containsKey(textureId)) {
-                                colorId = colorCounts.get(textureId) + 1;
-                            } else {
-                                colorId = 0;
-                            }
-                            colorCounts.put(textureId, colorId);
-                            textureColorNumberMap.put(textureColorPair, colorId);
-                        }
-
-                        List<Quad> quadsForColor = colorQuadMap.get(color);
-                        // modelName uniquely identifies a combination of a texture and a color
-                        String modelName = String.valueOf(textureId) + '-' + colorId;
-                        if (!savedMaterials.contains(modelName)) {
-                            File fullTextureFilename = new File(texturePath, modelName + ".png");
-                            BufferedImage coloredTextureImg = color == -1 ? textureImg : ImgUtils.tintImage(textureImg, color);
-                            writeTexture(fullTextureFilename, coloredTextureImg);
-                            savedMaterials.add(modelName);
-
-                            // write material information to .mtl file
-                            mtlbw.write("newmtl " + modelName + "\n");
-                            try {
-                                if (ImgUtils.imageHasTransparency(textureImg)) {
-                                    mtlbw.write("map_d " + textureDirName + '/' + modelName + ".png" + '\n');
-                                }
-                            } catch (InterruptedException ignored) {
-                            }
-                            mtlbw.write("map_Kd " + textureDirName + '/' + modelName + ".png" + "\n\n");
-                        }
-
-                        // write all related quads for that material to .obj file
-                        objbw.write("usemtl " + modelName + '\n');
-                        for (Quad quad : quadsForColor) {
-                            objbw.write(quadToObj(quad, verticesCount, textureUvCount, uvbound));
-                            verticesCount += 4;
-                            textureUvCount += 4;
-                        }
+                // write all related quads for each material/model id to .obj file
+                for (int modelId : quadsForModel.keySet()) {
+                    objbw.write("usemtl " + modelId + '\n');
+                    for (Quad quad : quadsForModel.get(modelId)) {
+                        objbw.write(quadToObj(quad, verticesCount, textureUvCount));
+                        verticesCount += 4;
+                        textureUvCount += 4;
                     }
                 }
 
-                // One chunk of data has been consumed: clear it to prepare for the next chunk
-                quads.clear();
-                uvColorQuadMap.clear();
+                // one chunk of data has been consumed: clear it to prepare for the next chunk
+                allQuads.clear();
             }
-
         } catch (IOException e) {
             logger.debug("Unable to export world data");
         }
+    }
+
+    private BufferedImage getImageFromUV(UVBounds uvbound, int color) {
+        int width = Math.round(atlasImage.getWidth() * uvbound.uDist());
+        int height = Math.round(atlasImage.getHeight() * uvbound.vDist());
+        int startX = Math.round(atlasImage.getWidth() * uvbound.uMin);
+        int startY = Math.round(atlasImage.getHeight() * uvbound.vMin);
+        BufferedImage textureImg = null;
+        try {
+            textureImg = atlasImage.getSubimage(startX, startY, width, height);
+        } catch (RasterFormatException exception) {
+            logger.warn("Unable to get the texture for uvbounds: " + width + "w, " + height + "h, " + startX + "x, " + startY + "y, " + "with Uv bounds: " +
+                    String.join(",", String.valueOf(uvbound.uMin), String.valueOf(uvbound.uMax), String.valueOf(uvbound.vMin), String.valueOf(uvbound.vMax)));
+        }
+        if (textureImg != null && color != -1) {
+            textureImg = ImgUtils.tintImage(textureImg, color);
+        }
+        return textureImg;
+    }
+
+    private void sortQuads(ArrayList<Quad> quads) {
+        quads.sort(quadComparator);
+    }
+
+    private Comparator<Quad> getQuadSort() {
+        return (quad1, quad2) -> {
+            BlockRenderLayer quad1Layer = quad1.getType();
+            BlockRenderLayer quad2Layer = quad2.getType();
+            if (quad1Layer == quad2Layer) {
+                float avg1 = uvTransparencyCache.computeIfAbsent(quad1.getUvBounds(), k -> ImgUtils.averageTransparencyValue(getImageFromUV(quad1.getUvBounds(), -1)));
+                float avg2 = uvTransparencyCache.computeIfAbsent(quad2.getUvBounds(), k -> ImgUtils.averageTransparencyValue(getImageFromUV(quad2.getUvBounds(), -1)));
+                return Float.compare(avg1, avg2);
+            } else {
+                return quad1Layer.compareTo(quad2Layer);
+            }
+        };
     }
 }
