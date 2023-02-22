@@ -80,7 +80,7 @@ public class Exporter {
     protected void addBuilderData(RegionRenderCacheBuilder renderCacheBuilder) {
         for (int blockRenderLayerId = 0; blockRenderLayerId < BlockRenderLayer.values().length; ++blockRenderLayerId) {
             BufferBuilder bufferBuilder = renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId);
-            if (bufferBuilder.getVertexCount() == 0) {
+            if (bufferBuilder.getVertexCount() == 0 || bufferBuilder.getDrawMode() != GL11.GL_QUADS) {
                 continue;
             }
             VertexFormat vertexFormat = bufferBuilder.getVertexFormat();
@@ -101,14 +101,15 @@ public class Exporter {
                 boolean skipQuad = false;
                 bytebuffer.position(firstVertexBytePos);
                 for (int vertexNum = 0; vertexNum < vertexCount; ++vertexNum) {
-                    if (quad.getCount() == 4) {
-                        if (skipQuad) {
-                            quad = new Quad(BlockRenderLayer.values()[blockRenderLayerId]);
-                            skipQuad = false;
-                        } else {
-                            blockQuadsMap.computeIfAbsent(pos, k -> new ArrayList<>()).add(quad);
-                            quad = new Quad(BlockRenderLayer.values()[blockRenderLayerId]);
-                        }
+                    if (skipQuad) {
+                        vertexNum += 4 - (vertexNum - 1) % 4;
+                        if (vertexNum >= vertexCount) break;
+                        bytebuffer.position(bytebuffer.position() + (4 - ((vertexNum - 1) % 4)));
+                        quad = new Quad(BlockRenderLayer.values()[blockRenderLayerId]);
+                        skipQuad = false;
+                    } else if (quad.getCount() == 4) {
+                        blockQuadsMap.computeIfAbsent(pos, k -> new ArrayList<>()).add(quad);
+                        quad = new Quad(BlockRenderLayer.values()[blockRenderLayerId]);
                     }
 
                     Vertex vertex = new Vertex();
@@ -172,7 +173,9 @@ public class Exporter {
                         }
                     }
 
-                    quad.addVertex(vertex);
+                    if (!skipQuad) {
+                        quad.addVertex(vertex);
+                    }
                 }
 
                 // add the last quad
