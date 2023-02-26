@@ -15,7 +15,7 @@ apply plugin: 'maven-publish'
 
 def mcversion = '1.12.2'
 
-version = '0.0.3'
+version = '0.1.0'
 group = 'bret.worldexporter' // http://maven.apache.org/guides/mini/guide-naming-conventions.html
 archivesBaseName = "worldexporter-${mcversion}"
 
