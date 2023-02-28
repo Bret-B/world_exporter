@@ -40,3 +40,5 @@ Current limitations:
 ![Basement render](../assets/images/bath-basement.png?raw=true)
 
 These renders were created by Familycreature4 using both this tool and Blender.
+
+A python script for fixing texture issues after importing into Blender can be found in the scripts folder.
