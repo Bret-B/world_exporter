@@ -1,21 +1,21 @@
 package bret.worldexporter;
 
 import net.minecraft.block.BlockLiquid;
+import net.minecraft.block.BlockState;
 import net.minecraft.block.material.Material;
-import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.color.BlockColors;
+import net.minecraft.client.renderer.texture.AtlasTexture;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
-import net.minecraft.client.renderer.texture.TextureMap;
-import net.minecraft.util.EnumFacing;
+import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.world.IBlockAccess;
-import net.minecraftforge.fml.relauncher.Side;
-import net.minecraftforge.fml.relauncher.SideOnly;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 
-@SideOnly(Side.CLIENT)
+@OnlyIn(Dist.CLIENT)
 public class CustomBlockFluidRenderer {
     private final BlockColors blockColors;
     private final TextureAtlasSprite[] atlasSpritesLava = new TextureAtlasSprite[2];
@@ -28,7 +28,7 @@ public class CustomBlockFluidRenderer {
     }
 
     protected void initAtlasSprites() {
-        TextureMap texturemap = Minecraft.getMinecraft().getTextureMapBlocks();
+        AtlasTexture texturemap = Minecraft.getMinecraft().getTextureMapBlocks();
         this.atlasSpritesLava[0] = texturemap.getAtlasSprite("minecraft:blocks/lava_still");
         this.atlasSpritesLava[1] = texturemap.getAtlasSprite("minecraft:blocks/lava_flow");
         this.atlasSpritesWater[0] = texturemap.getAtlasSprite("minecraft:blocks/water_still");
@@ -36,7 +36,7 @@ public class CustomBlockFluidRenderer {
         this.atlasSpriteWaterOverlay = texturemap.getAtlasSprite("minecraft:blocks/water_overlay");
     }
 
-    public boolean renderFluid(IBlockAccess blockAccess, IBlockState blockStateIn, BlockPos blockPosIn, BufferBuilder bufferBuilderIn) {
+    public boolean renderFluid(IBlockAccess blockAccess, BlockState blockStateIn, BlockPos blockPosIn, BufferBuilder bufferBuilderIn) {
         BlockLiquid blockliquid = (BlockLiquid) blockStateIn.getBlock();
         boolean flag = blockStateIn.getMaterial() == Material.LAVA;
         TextureAtlasSprite[] atextureatlassprite = flag ? this.atlasSpritesLava : this.atlasSpritesWater;
@@ -44,9 +44,9 @@ public class CustomBlockFluidRenderer {
         float f = (float) (i >> 16 & 255) / 255.0F;
         float f1 = (float) (i >> 8 & 255) / 255.0F;
         float f2 = (float) (i & 255) / 255.0F;
-        boolean flag1 = blockStateIn.shouldSideBeRendered(blockAccess, blockPosIn, EnumFacing.UP);
-        boolean flag2 = blockStateIn.shouldSideBeRendered(blockAccess, blockPosIn, EnumFacing.DOWN);
-        boolean[] aboolean = new boolean[]{blockStateIn.shouldSideBeRendered(blockAccess, blockPosIn, EnumFacing.NORTH), blockStateIn.shouldSideBeRendered(blockAccess, blockPosIn, EnumFacing.SOUTH), blockStateIn.shouldSideBeRendered(blockAccess, blockPosIn, EnumFacing.WEST), blockStateIn.shouldSideBeRendered(blockAccess, blockPosIn, EnumFacing.EAST)};
+        boolean flag1 = blockStateIn.shouldSideBeRendered(blockAccess, blockPosIn, Direction.UP);
+        boolean flag2 = blockStateIn.shouldSideBeRendered(blockAccess, blockPosIn, Direction.DOWN);
+        boolean[] aboolean = new boolean[]{blockStateIn.shouldSideBeRendered(blockAccess, blockPosIn, Direction.NORTH), blockStateIn.shouldSideBeRendered(blockAccess, blockPosIn, Direction.SOUTH), blockStateIn.shouldSideBeRendered(blockAccess, blockPosIn, Direction.WEST), blockStateIn.shouldSideBeRendered(blockAccess, blockPosIn, Direction.EAST)};
 
         if (!flag1 && !flag2 && !aboolean[0] && !aboolean[1] && !aboolean[2] && !aboolean[3]) {
             return false;
@@ -164,9 +164,9 @@ public class CustomBlockFluidRenderer {
                 TextureAtlasSprite textureatlassprite1 = atextureatlassprite[1];
 
                 if (!flag) {
-                    IBlockState state = blockAccess.getBlockState(blockpos);
+                    BlockState state = blockAccess.getBlockState(blockpos);
 
-                    if (state.getBlockFaceShape(blockAccess, blockpos, EnumFacing.VALUES[i1 + 2].getOpposite()) == net.minecraft.block.state.BlockFaceShape.SOLID) {
+                    if (state.getBlockFaceShape(blockAccess, blockpos, Direction.VALUES[i1 + 2].getOpposite()) == net.minecraft.block.state.BlockFaceShape.SOLID) {
                         textureatlassprite1 = this.atlasSpriteWaterOverlay;
                     }
                 }
@@ -252,7 +252,7 @@ public class CustomBlockFluidRenderer {
                 return 1.0F;
             }
 
-            IBlockState iblockstate = blockAccess.getBlockState(blockpos);
+            BlockState iblockstate = blockAccess.getBlockState(blockpos);
             Material material = iblockstate.getMaterial();
 
             if (material != blockMaterial) {

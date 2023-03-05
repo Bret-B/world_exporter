@@ -1,17 +1,18 @@
 package bret.worldexporter;
 
-import net.minecraft.block.state.IBlockState;
+import bret.worldexporter.legacylwjgl.Vector2f;
+import bret.worldexporter.legacylwjgl.Vector3f;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.RegionRenderCacheBuilder;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.client.renderer.vertex.VertexFormat;
 import net.minecraft.client.renderer.vertex.VertexFormatElement;
-import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.entity.player.ServerPlayerEntity;
 import net.minecraft.util.BlockRenderLayer;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.IBlockAccess;
+import net.minecraft.world.World;
 import net.minecraftforge.client.ForgeHooksClient;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
@@ -20,8 +21,6 @@ import org.apache.logging.log4j.Logger;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
-import org.lwjgl.util.vector.Vector2f;
-import org.lwjgl.util.vector.Vector3f;
 
 import java.awt.image.BufferedImage;
 import java.nio.ByteBuffer;
@@ -31,7 +30,7 @@ import java.util.*;
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
 public class Exporter {
-    protected final Minecraft mc = Minecraft.getMinecraft();
+    protected final Minecraft mc = Minecraft.getInstance();
     protected final CustomBlockRendererDispatcher blockRenderer = new CustomBlockRendererDispatcher(mc.getBlockRendererDispatcher().getBlockModelShapes(), mc.getBlockColors());
     protected final RegionRenderCacheBuilder renderCacheBuilder = new RegionRenderCacheBuilder();
     protected final boolean[] startedBufferBuilders = new boolean[BlockRenderLayer.values().length];
@@ -46,11 +45,11 @@ public class Exporter {
     private final int playerZ;
     private final BlockPos startPos;
     private final BlockPos endPos;
-    private final IBlockAccess world;
+    private final World world;
     private int currentX;
     private int currentZ;
 
-    public Exporter(EntityPlayer player, int radius, int lower, int upper) {
+    public Exporter(ServerPlayerEntity player, int radius, int lower, int upper) {
         // Create entire atlas image as a BufferedImage to be used when exporting
         int textureId = mc.getTextureManager().getTexture(new ResourceLocation("minecraft", "textures/atlas/blocks.png")).getGlTextureId();
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, textureId);
@@ -79,7 +78,7 @@ public class Exporter {
 
     protected void addBuilderData(RegionRenderCacheBuilder renderCacheBuilder) {
         for (int blockRenderLayerId = 0; blockRenderLayerId < BlockRenderLayer.values().length; ++blockRenderLayerId) {
-            BufferBuilder bufferBuilder = renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId);
+            BufferBuilder bufferBuilder = renderCacheBuilder.getBuilder(blockRenderLayerId);
             if (bufferBuilder.getVertexCount() == 0 || bufferBuilder.getDrawMode() != GL11.GL_QUADS) {
                 continue;
             }
@@ -191,7 +190,7 @@ public class Exporter {
         Arrays.fill(startedBufferBuilders, false);
         for (BlockRenderLayer blockRenderLayer : BlockRenderLayer.values()) {
             int blockRenderLayerId = blockRenderLayer.ordinal();
-            BufferBuilder bufferBuilder = renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId);
+            BufferBuilder bufferBuilder = renderCacheBuilder.getBuilder(blockRenderLayerId);
             bufferBuilder.setTranslation(-playerX, 0, -playerZ);
             bufferBuilder.reset();
         }
@@ -226,7 +225,7 @@ public class Exporter {
 
                 ForgeHooksClient.setRenderLayer(blockRenderLayer);
                 int blockRenderLayerId = blockRenderLayer.ordinal();
-                BufferBuilder bufferBuilder = renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId);
+                BufferBuilder bufferBuilder = renderCacheBuilder.getBuilder(blockRenderLayerId);
 
                 if (!startedBufferBuilders[blockRenderLayerId]) {
                     startedBufferBuilders[blockRenderLayerId] = true;
@@ -253,7 +252,7 @@ public class Exporter {
             if (!startedBufferBuilders[blockRenderLayerId]) {
                 continue;
             }
-            renderCacheBuilder.getWorldRendererByLayerId(blockRenderLayerId).finishDrawing();
+            renderCacheBuilder.getBuilder(blockRenderLayerId).finishDrawing();
         }
 
         addBuilderData(renderCacheBuilder);

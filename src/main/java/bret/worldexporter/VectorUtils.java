@@ -1,7 +1,7 @@
 package bret.worldexporter;
 
-import org.lwjgl.util.vector.Matrix3f;
-import org.lwjgl.util.vector.Vector3f;
+import bret.worldexporter.legacylwjgl.Matrix3f;
+import bret.worldexporter.legacylwjgl.Vector3f;
 
 public class VectorUtils {
     // https://stackoverflow.com/questions/9423621/3d-rotations-of-a-plane

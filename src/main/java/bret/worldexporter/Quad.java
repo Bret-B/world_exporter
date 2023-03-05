@@ -1,9 +1,9 @@
 package bret.worldexporter;
 
+import bret.worldexporter.legacylwjgl.Matrix3f;
+import bret.worldexporter.legacylwjgl.Vector2f;
+import bret.worldexporter.legacylwjgl.Vector3f;
 import net.minecraft.util.BlockRenderLayer;
-import org.lwjgl.util.vector.Matrix3f;
-import org.lwjgl.util.vector.Vector2f;
-import org.lwjgl.util.vector.Vector3f;
 
 import java.util.Arrays;
 import java.util.Objects;

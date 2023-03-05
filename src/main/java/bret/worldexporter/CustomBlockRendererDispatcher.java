@@ -1,21 +1,21 @@
 package bret.worldexporter;
 
-import net.minecraft.block.state.IBlockState;
+import net.minecraft.block.BlockRenderType;
+import net.minecraft.block.BlockState;
 import net.minecraft.client.renderer.BlockModelShapes;
 import net.minecraft.client.renderer.BufferBuilder;
-import net.minecraft.client.renderer.block.model.IBakedModel;
 import net.minecraft.client.renderer.color.BlockColors;
+import net.minecraft.client.renderer.model.IBakedModel;
 import net.minecraft.crash.CrashReport;
 import net.minecraft.crash.CrashReportCategory;
-import net.minecraft.util.EnumBlockRenderType;
-import net.minecraft.util.ReportedException;
+import net.minecraft.crash.ReportedException;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.IBlockAccess;
 import net.minecraft.world.WorldType;
-import net.minecraftforge.fml.relauncher.Side;
-import net.minecraftforge.fml.relauncher.SideOnly;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 
-@SideOnly(Side.CLIENT)
+@OnlyIn(Dist.CLIENT)
 public class CustomBlockRendererDispatcher {
 
     private final BlockModelShapes blockModelShapes;
@@ -28,11 +28,11 @@ public class CustomBlockRendererDispatcher {
         this.fluidRenderer = new CustomBlockFluidRenderer(p_i46577_2_);
     }
 
-    public boolean renderBlock(IBlockState state, BlockPos pos, IBlockAccess blockAccess, BufferBuilder bufferBuilderIn) {
+    public boolean renderBlock(BlockState state, BlockPos pos, IBlockAccess blockAccess, BufferBuilder bufferBuilderIn) {
         try {
-            EnumBlockRenderType enumblockrendertype = state.getRenderType();
+            BlockRenderType enumblockrendertype = state.getRenderType();
 
-            if (enumblockrendertype == EnumBlockRenderType.INVISIBLE) {
+            if (enumblockrendertype == BlockRenderType.INVISIBLE) {
                 return false;
             } else {
                 if (blockAccess.getWorldType() != WorldType.DEBUG_ALL_BLOCK_STATES) {
@@ -62,7 +62,7 @@ public class CustomBlockRendererDispatcher {
         }
     }
 
-    public IBakedModel getModelForState(IBlockState state) {
+    public IBakedModel getModelForState(BlockState state) {
         return this.blockModelShapes.getModelForState(state);
     }
 }

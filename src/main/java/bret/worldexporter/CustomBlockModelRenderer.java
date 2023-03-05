@@ -1,28 +1,28 @@
 package bret.worldexporter;
 
-import net.minecraft.block.state.IBlockState;
+import net.minecraft.block.BlockState;
 import net.minecraft.client.renderer.BufferBuilder;
-import net.minecraft.client.renderer.EntityRenderer;
-import net.minecraft.client.renderer.block.model.BakedQuad;
-import net.minecraft.client.renderer.block.model.IBakedModel;
+import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.color.BlockColors;
+import net.minecraft.client.renderer.model.BakedQuad;
+import net.minecraft.client.renderer.model.IBakedModel;
 import net.minecraft.client.renderer.texture.TextureUtil;
 import net.minecraft.crash.CrashReport;
 import net.minecraft.crash.CrashReportCategory;
-import net.minecraft.util.EnumFacing;
-import net.minecraft.util.ReportedException;
+import net.minecraft.crash.ReportedException;
+import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.IBlockAccess;
-import net.minecraftforge.fml.relauncher.Side;
-import net.minecraftforge.fml.relauncher.SideOnly;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 
 import javax.annotation.Nullable;
 import java.util.BitSet;
 import java.util.List;
 
-@SideOnly(Side.CLIENT)
+@OnlyIn(Dist.CLIENT)
 public class CustomBlockModelRenderer {
     private final BlockColors blockColors;
 
@@ -30,11 +30,11 @@ public class CustomBlockModelRenderer {
         this.blockColors = blockColorsIn;
     }
 
-    public boolean renderModel(IBlockAccess blockAccessIn, IBakedModel modelIn, IBlockState blockStateIn, BlockPos blockPosIn, BufferBuilder buffer, boolean checkSides) {
+    public boolean renderModel(IBlockAccess blockAccessIn, IBakedModel modelIn, BlockState blockStateIn, BlockPos blockPosIn, BufferBuilder buffer, boolean checkSides) {
         return this.renderModel(blockAccessIn, modelIn, blockStateIn, blockPosIn, buffer, checkSides, MathHelper.getPositionRandom(blockPosIn));
     }
 
-    public boolean renderModel(IBlockAccess worldIn, IBakedModel modelIn, IBlockState stateIn, BlockPos posIn, BufferBuilder buffer, boolean checkSides, long rand) {
+    public boolean renderModel(IBlockAccess worldIn, IBakedModel modelIn, BlockState stateIn, BlockPos posIn, BufferBuilder buffer, boolean checkSides, long rand) {
         try {
             return this.renderModelFlat(worldIn, modelIn, stateIn, posIn, buffer, checkSides, rand);
         } catch (Throwable throwable) {
@@ -46,11 +46,11 @@ public class CustomBlockModelRenderer {
         }
     }
 
-    public boolean renderModelFlat(IBlockAccess worldIn, IBakedModel modelIn, IBlockState stateIn, BlockPos posIn, BufferBuilder buffer, boolean checkSides, long rand) {
+    public boolean renderModelFlat(IBlockAccess worldIn, IBakedModel modelIn, BlockState stateIn, BlockPos posIn, BufferBuilder buffer, boolean checkSides, long rand) {
         boolean flag = false;
         BitSet bitset = new BitSet(3);
 
-        for (EnumFacing enumfacing : EnumFacing.values()) {
+        for (Direction enumfacing : Direction.values()) {
             List<BakedQuad> list = modelIn.getQuads(stateIn, enumfacing, rand);
 
             if (!list.isEmpty() && (!checkSides || stateIn.shouldSideBeRendered(worldIn, posIn, enumfacing))) {
@@ -60,7 +60,7 @@ public class CustomBlockModelRenderer {
             }
         }
 
-        List<BakedQuad> list1 = modelIn.getQuads(stateIn, (EnumFacing) null, rand);
+        List<BakedQuad> list1 = modelIn.getQuads(stateIn, (Direction) null, rand);
 
         if (!list1.isEmpty()) {
             this.renderQuadsFlat(worldIn, stateIn, posIn, -1, true, buffer, list1, bitset);
@@ -70,7 +70,7 @@ public class CustomBlockModelRenderer {
         return flag;
     }
 
-    private void fillQuadBounds(IBlockState stateIn, int[] vertexData, EnumFacing face, @Nullable float[] quadBounds, BitSet boundsFlags) {
+    private void fillQuadBounds(BlockState stateIn, int[] vertexData, Direction face, @Nullable float[] quadBounds, BitSet boundsFlags) {
         float f = 32.0F;
         float f1 = 32.0F;
         float f2 = 32.0F;
@@ -91,19 +91,19 @@ public class CustomBlockModelRenderer {
         }
 
         if (quadBounds != null) {
-            quadBounds[EnumFacing.WEST.getIndex()] = f;
-            quadBounds[EnumFacing.EAST.getIndex()] = f3;
-            quadBounds[EnumFacing.DOWN.getIndex()] = f1;
-            quadBounds[EnumFacing.UP.getIndex()] = f4;
-            quadBounds[EnumFacing.NORTH.getIndex()] = f2;
-            quadBounds[EnumFacing.SOUTH.getIndex()] = f5;
-            int j = EnumFacing.values().length;
-            quadBounds[EnumFacing.WEST.getIndex() + j] = 1.0F - f;
-            quadBounds[EnumFacing.EAST.getIndex() + j] = 1.0F - f3;
-            quadBounds[EnumFacing.DOWN.getIndex() + j] = 1.0F - f1;
-            quadBounds[EnumFacing.UP.getIndex() + j] = 1.0F - f4;
-            quadBounds[EnumFacing.NORTH.getIndex() + j] = 1.0F - f2;
-            quadBounds[EnumFacing.SOUTH.getIndex() + j] = 1.0F - f5;
+            quadBounds[Direction.WEST.getIndex()] = f;
+            quadBounds[Direction.EAST.getIndex()] = f3;
+            quadBounds[Direction.DOWN.getIndex()] = f1;
+            quadBounds[Direction.UP.getIndex()] = f4;
+            quadBounds[Direction.NORTH.getIndex()] = f2;
+            quadBounds[Direction.SOUTH.getIndex()] = f5;
+            int j = Direction.values().length;
+            quadBounds[Direction.WEST.getIndex() + j] = 1.0F - f;
+            quadBounds[Direction.EAST.getIndex() + j] = 1.0F - f3;
+            quadBounds[Direction.DOWN.getIndex() + j] = 1.0F - f1;
+            quadBounds[Direction.UP.getIndex() + j] = 1.0F - f4;
+            quadBounds[Direction.NORTH.getIndex() + j] = 1.0F - f2;
+            quadBounds[Direction.SOUTH.getIndex() + j] = 1.0F - f5;
         }
 
         float f9 = 1.0E-4F;
@@ -136,7 +136,7 @@ public class CustomBlockModelRenderer {
         }
     }
 
-    private void renderQuadsFlat(IBlockAccess blockAccessIn, IBlockState stateIn, BlockPos posIn, int brightnessIn, boolean ownBrightness, BufferBuilder buffer, List<BakedQuad> list, BitSet bitSet) {
+    private void renderQuadsFlat(IBlockAccess blockAccessIn, BlockState stateIn, BlockPos posIn, int brightnessIn, boolean ownBrightness, BufferBuilder buffer, List<BakedQuad> list, BitSet bitSet) {
         Vec3d vec3d = stateIn.getOffset(blockAccessIn, posIn);
         double d0 = (double) posIn.getX() + vec3d.x;
         double d1 = (double) posIn.getY() + vec3d.y;
@@ -158,7 +158,7 @@ public class CustomBlockModelRenderer {
             if (bakedquad.hasTintIndex()) {
                 int k = this.blockColors.colorMultiplier(stateIn, blockAccessIn, posIn, bakedquad.getTintIndex());
 
-                if (EntityRenderer.anaglyphEnable) {
+                if (GameRenderer.anaglyphEnable) {
                     k = TextureUtil.anaglyphColor(k);
                 }
 

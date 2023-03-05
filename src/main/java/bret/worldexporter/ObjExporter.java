@@ -1,12 +1,12 @@
 package bret.worldexporter;
 
+import bret.worldexporter.legacylwjgl.Vector2f;
+import bret.worldexporter.legacylwjgl.Vector3f;
 import net.minecraft.client.Minecraft;
-import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.entity.player.ServerPlayerEntity;
 import net.minecraft.util.BlockRenderLayer;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
-import org.lwjgl.util.vector.Vector2f;
-import org.lwjgl.util.vector.Vector3f;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -23,7 +23,7 @@ public class ObjExporter extends Exporter {
     private final Map<UVBounds, Float> uvTransparencyCache = new HashMap<>();
     private final Comparator<Quad> quadComparator = getQuadSort();
 
-    public ObjExporter(EntityPlayer player, int radius, int lower, int upper) {
+    public ObjExporter(ServerPlayerEntity player, int radius, int lower, int upper) {
         super(player, radius, lower, upper);
     }
 
@@ -136,7 +136,7 @@ public class ObjExporter extends Exporter {
     }
 
     public void export(String objFilenameIn, String mtlFilenameIn) throws IOException {
-        File baseDir = new File(Minecraft.getMinecraft().mcDataDir, "worldexporter/worlddump" + java.time.LocalDateTime.now().toString().replace(':', '-'));
+        File baseDir = new File(Minecraft.getInstance().gameDir, "worldexporter/worlddump" + java.time.LocalDateTime.now().toString().replace(':', '-'));
         String textureDirName = "t";
         File texturePath = new File(baseDir, textureDirName);
         Files.createDirectories(texturePath.toPath());

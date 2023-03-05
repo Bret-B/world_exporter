@@ -3,6 +3,8 @@ A Minecraft Forge mod for exporting parts of a world to a Wavefront .obj file.
 
 ![Render of a world export in Blender](../assets/images/atm3-orthographic.png?raw=true)
 
+Note: WIP port of the 1.12.2 version
+
 # Usage and More Information
 
 Install the mod jar like you would any other forge mod. 
