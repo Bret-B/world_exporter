@@ -21,36 +21,36 @@ public class Vertex {
         this.color = other.color;
     }
 
-    public void setPosition(Vector3f position) {
-        this.position = position;
-    }
-
-    public void setUv(Vector2f uv) {
-        this.uv = uv;
-    }
-
-    public void setColor(int color) {
-        this.color = color;
-    }
-
-    public void setUvlight(Vector2f uvlight) {
-        this.uvlight = uvlight;
-    }
-
     public Vector3f getPosition() {
         return position;
+    }
+
+    public void setPosition(Vector3f position) {
+        this.position = position;
     }
 
     public Vector2f getUv() {
         return uv;
     }
 
+    public void setUv(Vector2f uv) {
+        this.uv = uv;
+    }
+
     public int getColor() {
         return color;
     }
 
+    public void setColor(int color) {
+        this.color = color;
+    }
+
     public Vector2f getUvlight() {
         return uvlight;
+    }
+
+    public void setUvlight(Vector2f uvlight) {
+        this.uvlight = uvlight;
     }
 
     public boolean hasUv() {

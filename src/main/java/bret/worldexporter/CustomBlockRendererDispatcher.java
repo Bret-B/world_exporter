@@ -9,47 +9,39 @@ import net.minecraft.client.renderer.model.IBakedModel;
 import net.minecraft.crash.CrashReport;
 import net.minecraft.crash.CrashReportCategory;
 import net.minecraft.crash.ReportedException;
+import net.minecraft.fluid.IFluidState;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.IBlockAccess;
-import net.minecraft.world.WorldType;
+import net.minecraft.world.IEnviromentBlockReader;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
+import java.util.Random;
+
 @OnlyIn(Dist.CLIENT)
 public class CustomBlockRendererDispatcher {
-
     private final BlockModelShapes blockModelShapes;
     private final CustomBlockModelRenderer blockModelRenderer;
-    private final CustomBlockFluidRenderer fluidRenderer;
+    //    private final ChestRenderer chestRenderer = new ChestRenderer();
+    private final CustomFluidBlockRenderer fluidRenderer;
+//    private final Random random = new Random();
 
     public CustomBlockRendererDispatcher(BlockModelShapes p_i46577_1_, BlockColors p_i46577_2_) {
         this.blockModelShapes = p_i46577_1_;
         this.blockModelRenderer = new CustomBlockModelRenderer(p_i46577_2_);
-        this.fluidRenderer = new CustomBlockFluidRenderer(p_i46577_2_);
+        this.fluidRenderer = new CustomFluidBlockRenderer();
     }
 
-    public boolean renderBlock(BlockState state, BlockPos pos, IBlockAccess blockAccess, BufferBuilder bufferBuilderIn) {
+    public boolean renderBlock(BlockState p_215330_1_, BlockPos p_215330_2_, IEnviromentBlockReader p_215330_3_, BufferBuilder p_215330_4_, Random p_215330_5_, net.minecraftforge.client.model.data.IModelData modelData) {
         try {
-            BlockRenderType enumblockrendertype = state.getRenderType();
-
-            if (enumblockrendertype == BlockRenderType.INVISIBLE) {
+            BlockRenderType blockrendertype = p_215330_1_.getRenderType();
+            if (blockrendertype == BlockRenderType.INVISIBLE) {
                 return false;
             } else {
-                if (blockAccess.getWorldType() != WorldType.DEBUG_ALL_BLOCK_STATES) {
-                    try {
-                        state = state.getActualState(blockAccess, pos);
-                    } catch (Exception ignored) {
-                    }
-                }
-
-                switch (enumblockrendertype) {
+                switch (blockrendertype) {
                     case MODEL:
-                        IBakedModel model = this.getModelForState(state);
-                        state = state.getBlock().getExtendedState(state, blockAccess, pos);
-                        return this.blockModelRenderer.renderModel(blockAccess, model, state, pos, bufferBuilderIn, true);
-                    case LIQUID:
-                        return this.fluidRenderer.renderFluid(blockAccess, state, pos, bufferBuilderIn);
+                        return this.blockModelRenderer.renderModel(p_215330_3_, this.getModelForState(p_215330_1_), p_215330_1_, p_215330_2_, p_215330_4_, true, p_215330_5_, p_215330_1_.getPositionRandom(p_215330_2_), modelData);
                     case ENTITYBLOCK_ANIMATED:
+                        return false;
                     default:
                         return false;
                 }
@@ -57,12 +49,23 @@ public class CustomBlockRendererDispatcher {
         } catch (Throwable throwable) {
             CrashReport crashreport = CrashReport.makeCrashReport(throwable, "Tesselating block in world");
             CrashReportCategory crashreportcategory = crashreport.makeCategory("Block being tesselated");
-            CrashReportCategory.addBlockInfo(crashreportcategory, pos, state.getBlock(), state.getBlock().getMetaFromState(state));
+            CrashReportCategory.addBlockInfo(crashreportcategory, p_215330_2_, p_215330_1_);
+            throw new ReportedException(crashreport);
+        }
+    }
+
+    public boolean renderFluid(BlockPos p_215331_1_, IEnviromentBlockReader p_215331_2_, BufferBuilder p_215331_3_, IFluidState p_215331_4_) {
+        try {
+            return this.fluidRenderer.render(p_215331_2_, p_215331_1_, p_215331_3_, p_215331_4_);
+        } catch (Throwable throwable) {
+            CrashReport crashreport = CrashReport.makeCrashReport(throwable, "Tesselating liquid in world");
+            CrashReportCategory crashreportcategory = crashreport.makeCategory("Block being tesselated");
+            CrashReportCategory.addBlockInfo(crashreportcategory, p_215331_1_, (BlockState) null);
             throw new ReportedException(crashreport);
         }
     }
 
     public IBakedModel getModelForState(BlockState state) {
-        return this.blockModelShapes.getModelForState(state);
+        return this.blockModelShapes.getModel(state);
     }
 }

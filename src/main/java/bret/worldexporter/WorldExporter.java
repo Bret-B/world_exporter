@@ -1,62 +1,58 @@
 package bret.worldexporter;
 
-import com.mojang.brigadier.CommandDispatcher;
-import com.mojang.brigadier.arguments.IntegerArgumentType;
-import net.minecraft.command.CommandSource;
-import net.minecraft.command.Commands;
-import net.minecraft.entity.player.ServerPlayerEntity;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.entity.player.ClientPlayerEntity;
+import net.minecraftforge.client.event.ClientChatEvent;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.server.FMLServerStartingEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 
-import static com.mojang.brigadier.arguments.IntegerArgumentType.integer;
-
 // TODO: use ClientChatEvent to allow the mod to function client-only
 @Mod(WorldExporter.MODID)
 public class WorldExporter {
     public static final String MODID = "worldexporter";
-    private static Logger logger;
+    private static final Logger LOGGER = LogManager.getLogger(WorldExporter.MODID);
 
-    @Mod.EventBusSubscriber(bus = Mod.EventBusSubscriber.Bus.MOD)
-    public static class RegistryEvents {
-        @SubscribeEvent
-        public static void onServerStarting(FMLServerStartingEvent event) {
-            logger = LogManager.getLogger();
-            WorldExport.register(event.getCommandDispatcher());
+    public WorldExporter() {
+        MinecraftForge.EVENT_BUS.register(this);
+    }
+
+    private static void execute(ClientPlayerEntity player, int radius, int lower, int upper) {
+        ObjExporter objExporter = new ObjExporter(player, radius, lower, upper);
+        try {
+            objExporter.export("world.obj", "world.mtl");
+        } catch (IOException e) {
+            LOGGER.error("Unable to export world data");
         }
     }
 
-    public static class WorldExport {
-        public static void register(CommandDispatcher<CommandSource> dispatcher) {
-            dispatcher.register(
-                    Commands.literal("worldexport")
-                            .then(Commands.argument("radius", integer(1)))
-                            .then(Commands.argument("lower", integer(0)))
-                            .then(Commands.argument("upper", integer(0, 255)))
-                                .executes(context -> execute(
-                                        context.getSource().asPlayer(),
-                                        IntegerArgumentType.getInteger(context, "radius"),
-                                        IntegerArgumentType.getInteger(context, "lower"),
-                                        IntegerArgumentType.getInteger(context, "upper")
-                                ))
-            );
+    @SubscribeEvent
+    public void onClientChatEvent(ClientChatEvent event) {
+        String msg = event.getOriginalMessage();
+        final String cmdName = "/worldexport";
+        if (!msg.startsWith(cmdName)) return;
+
+        event.setCanceled(true);  // Client side only: don't send a message to the server
+        String[] params = msg.substring(cmdName.length()).trim().split("\\s+");
+
+        int radius = 64;
+        try {
+            radius = params.length > 0 ? Integer.parseInt(params[0]) : 64;
+        } catch (NumberFormatException ignored) {
         }
 
-        public static int execute(ServerPlayerEntity player, int radius, int lower, int upper) {
-            if (player == null) return 1;
-
-            ObjExporter objExporter = new ObjExporter(player, radius, lower, upper);
-            try {
-                objExporter.export("world.obj", "world.mtl");
-            } catch (IOException e) {
-                logger.error("Unable to export world data");
-                return 1;
-            }
-            return 0;
+        int lower = 0;
+        int upper = 255;
+        try {
+            lower = params.length >= 2 ? Integer.parseInt(params[1]) : lower;
+            upper = params.length >= 3 ? Integer.parseInt(params[2]) : upper;
+        } catch (NumberFormatException ignored) {
         }
+
+        execute(Minecraft.getInstance().player, radius, lower, upper);
     }
 }

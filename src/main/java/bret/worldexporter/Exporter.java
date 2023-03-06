@@ -2,18 +2,22 @@ package bret.worldexporter;
 
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
+import net.minecraft.block.BlockRenderType;
+import net.minecraft.block.BlockState;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.RegionRenderCacheBuilder;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.client.renderer.vertex.VertexFormat;
 import net.minecraft.client.renderer.vertex.VertexFormatElement;
-import net.minecraft.entity.player.ServerPlayerEntity;
+import net.minecraft.fluid.IFluidState;
 import net.minecraft.util.BlockRenderLayer;
-import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.minecraftforge.client.ForgeHooksClient;
+import net.minecraftforge.client.model.ModelDataManager;
+import net.minecraftforge.client.model.data.IModelData;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
@@ -30,6 +34,7 @@ import java.util.*;
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
 public class Exporter {
+    protected static final Logger logger = LogManager.getLogger(WorldExporter.MODID);
     protected final Minecraft mc = Minecraft.getInstance();
     protected final CustomBlockRendererDispatcher blockRenderer = new CustomBlockRendererDispatcher(mc.getBlockRendererDispatcher().getBlockModelShapes(), mc.getBlockColors());
     protected final RegionRenderCacheBuilder renderCacheBuilder = new RegionRenderCacheBuilder();
@@ -37,8 +42,6 @@ public class Exporter {
     protected final BufferedImage atlasImage;
     protected final Map<BlockRenderLayer, Map<BlockPos, Pair<Integer, Integer>>> layerPosVerticesMap = new HashMap<>();
     protected final Map<BlockPos, ArrayList<Quad>> blockQuadsMap = new HashMap<>();
-    protected static final Logger logger = LogManager.getLogger(WorldExporter.MODID);
-
     private final int lowerHeightLimit;
     private final int upperHeightLimit;
     private final int playerX;
@@ -49,9 +52,9 @@ public class Exporter {
     private int currentX;
     private int currentZ;
 
-    public Exporter(ServerPlayerEntity player, int radius, int lower, int upper) {
+    public Exporter(ClientPlayerEntity player, int radius, int lower, int upper) {
         // Create entire atlas image as a BufferedImage to be used when exporting
-        int textureId = mc.getTextureManager().getTexture(new ResourceLocation("minecraft", "textures/atlas/blocks.png")).getGlTextureId();
+        int textureId = mc.getTextureMap().getGlTextureId();
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, textureId);
         GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
         GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
@@ -113,22 +116,22 @@ public class Exporter {
 
                     Vertex vertex = new Vertex();
                     for (VertexFormatElement vertexFormatElement : list) {
-                        VertexFormatElement.EnumUsage vertexElementEnumUsage = vertexFormatElement.getUsage();
+                        VertexFormatElement.Usage vertexElementEnumUsage = vertexFormatElement.getUsage();
                         switch (vertexElementEnumUsage) {
                             case POSITION:
-                                if (vertexFormatElement.getType() == VertexFormatElement.EnumType.FLOAT) {
+                                if (vertexFormatElement.getType() == VertexFormatElement.Type.FLOAT) {
                                     vertex.setPosition(new Vector3f(bytebuffer.getFloat(), bytebuffer.getFloat(), bytebuffer.getFloat()));
                                 } else {
-                                    bytebuffer.position(bytebuffer.position() + vertexFormat.getNextOffset());
+                                    bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
                                     logger.warn("Vertex position element had no supported type, skipping.");
                                     continue;
                                 }
                                 break;
                             case COLOR:
-                                if (vertexFormatElement.getType() == VertexFormatElement.EnumType.UBYTE) {
+                                if (vertexFormatElement.getType() == VertexFormatElement.Type.UBYTE) {
                                     vertex.setColor(bytebuffer.getInt());
                                 } else {
-                                    bytebuffer.position(bytebuffer.position() + vertexFormat.getNextOffset());
+                                    bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
                                     logger.warn("Vertex color element had no supported type, skipping.");
                                     continue;
                                 }
@@ -160,7 +163,7 @@ public class Exporter {
                                         vertex.setUvlight(new Vector2f(bytebuffer.getShort() / 65520.0f, bytebuffer.getShort() / 65520.0f));
                                         break;
                                     default:
-                                        bytebuffer.position(bytebuffer.position() + vertexFormat.getNextOffset());
+                                        bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
                                         logger.warn("Vertex UV element had no supported type, skipping.");
                                         continue;
                                 }
@@ -168,7 +171,7 @@ public class Exporter {
                             case PADDING:
                             case NORMAL:
                             default:
-                                bytebuffer.position(bytebuffer.position() + vertexFormat.getNextOffset());
+                                bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
                         }
                     }
 
@@ -211,39 +214,56 @@ public class Exporter {
         int chunkZOffset = ((currentZ % 16) + 16) % 16;
         BlockPos thisChunkStart = new BlockPos(currentX, upperHeightLimit, currentZ);
         BlockPos thisChunkEnd = new BlockPos(Math.max(currentX - chunkXOffset, endPos.getX()), lowerHeightLimit, Math.max(currentZ - chunkZOffset, endPos.getZ()));
-
+        Random random = new Random();
         for (BlockPos pos : BlockPos.getAllInBoxMutable(thisChunkStart, thisChunkEnd)) {
-            IBlockState state = world.getBlockState(pos).getActualState(world, pos);
+            BlockState state = world.getBlockState(pos);
             if (state.getBlock().isAir(state, world, pos)) {
                 continue;
             }
 
-            for (BlockRenderLayer blockRenderLayer : BlockRenderLayer.values()) {
-                if (!state.getBlock().canRenderInLayer(state, blockRenderLayer)) {
+            IFluidState ifluidstate = world.getFluidState(pos);
+            IModelData modelData = ModelDataManager.getModelData(world, pos);
+            for (BlockRenderLayer blockrenderlayer1 : BlockRenderLayer.values()) {
+                if (!ifluidstate.canRenderInLayer(blockrenderlayer1) && !state.canRenderInLayer(blockrenderlayer1)) {
                     continue;
                 }
 
-                ForgeHooksClient.setRenderLayer(blockRenderLayer);
-                int blockRenderLayerId = blockRenderLayer.ordinal();
-                BufferBuilder bufferBuilder = renderCacheBuilder.getBuilder(blockRenderLayerId);
+                int blockRenderLayerId = blockrenderlayer1.ordinal();
+                net.minecraftforge.client.ForgeHooksClient.setRenderLayer(blockrenderlayer1);
+                BufferBuilder bufferbuilder = renderCacheBuilder.getBuilder(blockRenderLayerId);
+                int vertexCountPre = bufferbuilder.getVertexCount();
 
-                if (!startedBufferBuilders[blockRenderLayerId]) {
-                    startedBufferBuilders[blockRenderLayerId] = true;
-                    bufferBuilder.begin(GL11.GL_QUADS, DefaultVertexFormats.BLOCK);
-                }
-
-                // OptiFine Shaders compatibility -- https://gist.github.com/Cadiboo/753607e41ca4e2ca9e0ce3b928bab5ef
-//				if (Config.isShaders()) SVertexBuilder.pushEntity(state, pos, blockAccess, bufferBuilder);
-                try {
-                    int vertexCountPre = bufferBuilder.getVertexCount();
-                    if (blockRenderer.renderBlock(state, pos, world, bufferBuilder)) {
-                        int addedVertexCount = bufferBuilder.getVertexCount() - vertexCountPre;
-                        layerPosVerticesMap.computeIfAbsent(blockRenderLayer, k -> new HashMap<>()).put(pos.toImmutable(), new ImmutablePair<>(vertexCountPre, addedVertexCount));
+                if (!ifluidstate.isEmpty() && ifluidstate.canRenderInLayer(blockrenderlayer1)) {
+                    if (!startedBufferBuilders[blockRenderLayerId]) {
+                        startedBufferBuilders[blockRenderLayerId] = true;
+                        bufferbuilder.begin(GL11.GL_QUADS, DefaultVertexFormats.BLOCK);
                     }
-                } catch (Exception exception) {
-                    logger.warn("Unable to render block: " + state.getBlock() + "      with position: " + pos + "\n" + exception);
+
+                    try {
+                        blockRenderer.renderFluid(pos, world, bufferbuilder, ifluidstate);
+                    } catch (Exception exception) {
+                        logger.warn("Unable to render block: " + state.getBlock() + "      with position: " + pos + "\n" + exception);
+                    }
                 }
-//				if (Config.isShaders()) SVertexBuilder.popEntity(bufferBuilder);
+
+                // note: may need to check if modelData == null in the future, but it is unused at the moment
+                if (state.getRenderType() != BlockRenderType.INVISIBLE && state.canRenderInLayer(blockrenderlayer1)) {
+                    if (!startedBufferBuilders[blockRenderLayerId]) {
+                        startedBufferBuilders[blockRenderLayerId] = true;
+                        bufferbuilder.begin(GL11.GL_QUADS, DefaultVertexFormats.BLOCK);
+                    }
+
+                    try {
+                        blockRenderer.renderBlock(state, pos, world, bufferbuilder, random, modelData);
+                    } catch (Exception exception) {
+                        logger.warn("Unable to render block: " + state.getBlock() + "      with position: " + pos + "\n" + exception);
+                    }
+                }
+
+                int addedVertexCount = bufferbuilder.getVertexCount() - vertexCountPre;
+                if (addedVertexCount > 0) {
+                    layerPosVerticesMap.computeIfAbsent(blockrenderlayer1, k -> new HashMap<>()).put(pos.toImmutable(), new ImmutablePair<>(vertexCountPre, addedVertexCount));
+                }
             }
             ForgeHooksClient.setRenderLayer(null);
         }

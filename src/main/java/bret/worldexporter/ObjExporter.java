@@ -3,7 +3,7 @@ package bret.worldexporter;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
 import net.minecraft.client.Minecraft;
-import net.minecraft.entity.player.ServerPlayerEntity;
+import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.util.BlockRenderLayer;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
@@ -23,7 +23,7 @@ public class ObjExporter extends Exporter {
     private final Map<UVBounds, Float> uvTransparencyCache = new HashMap<>();
     private final Comparator<Quad> quadComparator = getQuadSort();
 
-    public ObjExporter(ServerPlayerEntity player, int radius, int lower, int upper) {
+    public ObjExporter(ClientPlayerEntity player, int radius, int lower, int upper) {
         super(player, radius, lower, upper);
     }
 
@@ -81,7 +81,7 @@ public class ObjExporter extends Exporter {
                         continue;
                     }
 
-                    Vector3f posTranslate = (Vector3f) first.getNormal().scale(0.0005f);
+                    Vector3f posTranslate = (Vector3f) first.getNormal().scale(0.00075f);
                     for (int overlapQuad : overlapsWithFirst) {
                         quads.get(overlapQuad).translate(posTranslate);
                         newToCheck.add(overlapQuad);

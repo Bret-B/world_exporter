@@ -10,12 +10,12 @@ import java.util.Objects;
 
 public class Quad {
 
-    private final Vertex[] vertices = new Vertex[4];
-    private int count = 0;
-    private final BlockRenderLayer type;
-    private UVBounds uvBounds;
     private static final float TOLERANCE = 0.0001f;
     private static final Vector3f DESIRED_NORM = new Vector3f(0, 0, 1);
+    private final Vertex[] vertices = new Vertex[4];
+    private final BlockRenderLayer type;
+    private int count = 0;
+    private UVBounds uvBounds;
 
     public Quad(BlockRenderLayer renderType) {
         type = renderType;
