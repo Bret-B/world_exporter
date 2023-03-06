@@ -3,8 +3,6 @@ A Minecraft Forge mod for exporting parts of a world to a Wavefront .obj file.
 
 ![Render of a world export in Blender](../assets/images/atm3-orthographic.png?raw=true)
 
-Note: WIP port of the 1.12.2 version
-
 # Usage and More Information
 
 Install the mod jar like you would any other forge mod. 
@@ -20,6 +18,9 @@ When in game, run: `/worldexport {radius} {lower} {upper}` where each argument i
 Example usage:
 
 `/worldexport 128 50 255`
+
+Note: Due to clientside command limitations with 1.14.4, 
+the /worldexport command will not show up as a registered command, but will work fine.
 
 A few key features:
 * Resource/texture packs are supported
