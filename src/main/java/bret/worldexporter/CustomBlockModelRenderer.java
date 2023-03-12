@@ -1,8 +1,10 @@
 package bret.worldexporter;
 
+import com.mojang.blaze3d.matrix.MatrixStack;
+import com.mojang.blaze3d.vertex.IVertexBuilder;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
-import net.minecraft.client.renderer.BufferBuilder;
+import net.minecraft.client.renderer.WorldRenderer;
 import net.minecraft.client.renderer.color.BlockColors;
 import net.minecraft.client.renderer.model.BakedQuad;
 import net.minecraft.client.renderer.model.IBakedModel;
@@ -12,7 +14,7 @@ import net.minecraft.crash.ReportedException;
 import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.IEnviromentBlockReader;
+import net.minecraft.world.ILightReader;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -29,45 +31,72 @@ public class CustomBlockModelRenderer {
         this.blockColors = blockColorsIn;
     }
 
-    public boolean renderModel(IEnviromentBlockReader p_217631_1_, IBakedModel p_217631_2_, BlockState p_217631_3_, BlockPos p_217631_4_, BufferBuilder p_217631_5_, boolean p_217631_6_, Random p_217631_7_, long p_217631_8_, net.minecraftforge.client.model.data.IModelData modelData) {
-        modelData = p_217631_2_.getModelData(p_217631_1_, p_217631_4_, p_217631_3_, modelData);
+    public boolean renderModel(ILightReader worldIn, IBakedModel modelIn, BlockState stateIn, BlockPos posIn, MatrixStack matrixIn, IVertexBuilder buffer, boolean checkSides, Random randomIn, long rand, int combinedOverlayIn, net.minecraftforge.client.model.data.IModelData modelData) {
+        Vec3d vec3d = stateIn.getOffset(worldIn, posIn);
+        matrixIn.translate(vec3d.x, vec3d.y, vec3d.z);
+        modelData = modelIn.getModelData(worldIn, posIn, stateIn, modelData);
 
         try {
-            return this.renderModelFlat(p_217631_1_, p_217631_2_, p_217631_3_, p_217631_4_, p_217631_5_, p_217631_6_, p_217631_7_, p_217631_8_, modelData);
+            return this.renderModelFlat(worldIn, modelIn, stateIn, posIn, matrixIn, buffer, checkSides, randomIn, rand, combinedOverlayIn, modelData);
         } catch (Throwable throwable) {
             CrashReport crashreport = CrashReport.makeCrashReport(throwable, "Tesselating block model");
             CrashReportCategory crashreportcategory = crashreport.makeCategory("Block model being tesselated");
-            CrashReportCategory.addBlockInfo(crashreportcategory, p_217631_4_, p_217631_3_);
+            CrashReportCategory.addBlockInfo(crashreportcategory, posIn, stateIn);
             crashreportcategory.addDetail("Using AO", false);
             throw new ReportedException(crashreport);
         }
     }
 
-    public boolean renderModelFlat(IEnviromentBlockReader p_217635_1_, IBakedModel p_217635_2_, BlockState p_217635_3_, BlockPos p_217635_4_, BufferBuilder p_217635_5_, boolean p_217635_6_, Random p_217635_7_, long p_217635_8_, net.minecraftforge.client.model.data.IModelData modelData) {
+    public boolean renderModelFlat(ILightReader worldIn, IBakedModel modelIn, BlockState stateIn, BlockPos posIn, MatrixStack matrixStackIn, IVertexBuilder buffer, boolean checkSides, Random randomIn, long rand, int combinedOverlayIn, net.minecraftforge.client.model.data.IModelData modelData) {
         boolean flag = false;
         BitSet bitset = new BitSet(3);
 
         for (Direction direction : Direction.values()) {
-            p_217635_7_.setSeed(p_217635_8_);
-            List<BakedQuad> list = p_217635_2_.getQuads(p_217635_3_, direction, p_217635_7_, modelData);
-            if (!list.isEmpty() && (!p_217635_6_ || Block.shouldSideBeRendered(p_217635_3_, p_217635_1_, p_217635_4_, direction))) {
-                int i = p_217635_3_.getPackedLightmapCoords(p_217635_1_, p_217635_4_.offset(direction));
-                this.renderQuadsFlat(p_217635_1_, p_217635_3_, p_217635_4_, i, false, p_217635_5_, list, bitset);
+            randomIn.setSeed(rand);
+            List<BakedQuad> list = modelIn.getQuads(stateIn, direction, randomIn, modelData);
+            if (!list.isEmpty() && (!checkSides || Block.shouldSideBeRendered(stateIn, worldIn, posIn, direction))) {
+                int i = WorldRenderer.getPackedLightmapCoords(worldIn, stateIn, posIn.offset(direction));
+                this.renderQuadsFlat(worldIn, stateIn, posIn, i, combinedOverlayIn, false, matrixStackIn, buffer, list, bitset);
                 flag = true;
             }
         }
 
-        p_217635_7_.setSeed(p_217635_8_);
-        List<BakedQuad> list1 = p_217635_2_.getQuads(p_217635_3_, (Direction) null, p_217635_7_, modelData);
+        randomIn.setSeed(rand);
+        List<BakedQuad> list1 = modelIn.getQuads(stateIn, (Direction) null, randomIn, modelData);
         if (!list1.isEmpty()) {
-            this.renderQuadsFlat(p_217635_1_, p_217635_3_, p_217635_4_, -1, true, p_217635_5_, list1, bitset);
+            this.renderQuadsFlat(worldIn, stateIn, posIn, -1, combinedOverlayIn, true, matrixStackIn, buffer, list1, bitset);
             flag = true;
         }
 
         return flag;
     }
 
-    private void fillQuadBounds(IEnviromentBlockReader p_217633_1_, BlockState p_217633_2_, BlockPos p_217633_3_, int[] p_217633_4_, Direction p_217633_5_, @Nullable float[] p_217633_6_, BitSet p_217633_7_) {
+    private void renderQuadSmooth(ILightReader blockAccessIn, BlockState stateIn, BlockPos posIn, IVertexBuilder buffer, MatrixStack.Entry matrixEntry, BakedQuad quadIn, float colorMul0, float colorMul1, float colorMul2, float colorMul3, int brightness0, int brightness1, int brightness2, int brightness3, int combinedOverlayIn) {
+        float f;
+        float f1;
+        float f2;
+        if (quadIn.hasTintIndex()) {
+            int i = this.blockColors.getColor(stateIn, blockAccessIn, posIn, quadIn.getTintIndex());
+            f = (float) (i >> 16 & 255) / 255.0F;
+            f1 = (float) (i >> 8 & 255) / 255.0F;
+            f2 = (float) (i & 255) / 255.0F;
+        } else {
+            f = 1.0F;
+            f1 = 1.0F;
+            f2 = 1.0F;
+        }
+        // FORGE: Apply diffuse lighting at render-time instead of baking it in
+//        if (quadIn.shouldApplyDiffuseLighting()) {
+//            float l = net.minecraftforge.client.model.pipeline.LightUtil.diffuseLight(quadIn.getFace());
+//            f *= l;
+//            f1 *= l;
+//            f2 *= l;
+//        }
+
+        buffer.addQuad(matrixEntry, quadIn, new float[]{colorMul0, colorMul1, colorMul2, colorMul3}, f, f1, f2, new int[]{brightness0, brightness1, brightness2, brightness3}, combinedOverlayIn, true);
+    }
+
+    private void fillQuadBounds(ILightReader blockReaderIn, BlockState stateIn, BlockPos posIn, int[] vertexData, Direction face, @Nullable float[] quadBounds, BitSet boundsFlags) {
         float f = 32.0F;
         float f1 = 32.0F;
         float f2 = 32.0F;
@@ -76,9 +105,9 @@ public class CustomBlockModelRenderer {
         float f5 = -32.0F;
 
         for (int i = 0; i < 4; ++i) {
-            float f6 = Float.intBitsToFloat(p_217633_4_[i * 7]);
-            float f7 = Float.intBitsToFloat(p_217633_4_[i * 7 + 1]);
-            float f8 = Float.intBitsToFloat(p_217633_4_[i * 7 + 2]);
+            float f6 = Float.intBitsToFloat(vertexData[i * 8]);
+            float f7 = Float.intBitsToFloat(vertexData[i * 8 + 1]);
+            float f8 = Float.intBitsToFloat(vertexData[i * 8 + 2]);
             f = Math.min(f, f6);
             f1 = Math.min(f1, f7);
             f2 = Math.min(f2, f8);
@@ -87,94 +116,63 @@ public class CustomBlockModelRenderer {
             f5 = Math.max(f5, f8);
         }
 
-        if (p_217633_6_ != null) {
-            p_217633_6_[Direction.WEST.getIndex()] = f;
-            p_217633_6_[Direction.EAST.getIndex()] = f3;
-            p_217633_6_[Direction.DOWN.getIndex()] = f1;
-            p_217633_6_[Direction.UP.getIndex()] = f4;
-            p_217633_6_[Direction.NORTH.getIndex()] = f2;
-            p_217633_6_[Direction.SOUTH.getIndex()] = f5;
+        if (quadBounds != null) {
+            quadBounds[Direction.WEST.getIndex()] = f;
+            quadBounds[Direction.EAST.getIndex()] = f3;
+            quadBounds[Direction.DOWN.getIndex()] = f1;
+            quadBounds[Direction.UP.getIndex()] = f4;
+            quadBounds[Direction.NORTH.getIndex()] = f2;
+            quadBounds[Direction.SOUTH.getIndex()] = f5;
             int j = Direction.values().length;
-            p_217633_6_[Direction.WEST.getIndex() + j] = 1.0F - f;
-            p_217633_6_[Direction.EAST.getIndex() + j] = 1.0F - f3;
-            p_217633_6_[Direction.DOWN.getIndex() + j] = 1.0F - f1;
-            p_217633_6_[Direction.UP.getIndex() + j] = 1.0F - f4;
-            p_217633_6_[Direction.NORTH.getIndex() + j] = 1.0F - f2;
-            p_217633_6_[Direction.SOUTH.getIndex() + j] = 1.0F - f5;
+            quadBounds[Direction.WEST.getIndex() + j] = 1.0F - f;
+            quadBounds[Direction.EAST.getIndex() + j] = 1.0F - f3;
+            quadBounds[Direction.DOWN.getIndex() + j] = 1.0F - f1;
+            quadBounds[Direction.UP.getIndex() + j] = 1.0F - f4;
+            quadBounds[Direction.NORTH.getIndex() + j] = 1.0F - f2;
+            quadBounds[Direction.SOUTH.getIndex() + j] = 1.0F - f5;
         }
 
         float f9 = 1.0E-4F;
         float f10 = 0.9999F;
-        switch (p_217633_5_) {
+        switch (face) {
             case DOWN:
-                p_217633_7_.set(1, f >= 1.0E-4F || f2 >= 1.0E-4F || f3 <= 0.9999F || f5 <= 0.9999F);
-                p_217633_7_.set(0, f1 == f4 && (f1 < 1.0E-4F || p_217633_2_.func_224756_o(p_217633_1_, p_217633_3_)));
+                boundsFlags.set(1, f >= 1.0E-4F || f2 >= 1.0E-4F || f3 <= 0.9999F || f5 <= 0.9999F);
+                boundsFlags.set(0, f1 == f4 && (f1 < 1.0E-4F || stateIn.isCollisionShapeOpaque(blockReaderIn, posIn)));
                 break;
             case UP:
-                p_217633_7_.set(1, f >= 1.0E-4F || f2 >= 1.0E-4F || f3 <= 0.9999F || f5 <= 0.9999F);
-                p_217633_7_.set(0, f1 == f4 && (f4 > 0.9999F || p_217633_2_.func_224756_o(p_217633_1_, p_217633_3_)));
+                boundsFlags.set(1, f >= 1.0E-4F || f2 >= 1.0E-4F || f3 <= 0.9999F || f5 <= 0.9999F);
+                boundsFlags.set(0, f1 == f4 && (f4 > 0.9999F || stateIn.isCollisionShapeOpaque(blockReaderIn, posIn)));
                 break;
             case NORTH:
-                p_217633_7_.set(1, f >= 1.0E-4F || f1 >= 1.0E-4F || f3 <= 0.9999F || f4 <= 0.9999F);
-                p_217633_7_.set(0, f2 == f5 && (f2 < 1.0E-4F || p_217633_2_.func_224756_o(p_217633_1_, p_217633_3_)));
+                boundsFlags.set(1, f >= 1.0E-4F || f1 >= 1.0E-4F || f3 <= 0.9999F || f4 <= 0.9999F);
+                boundsFlags.set(0, f2 == f5 && (f2 < 1.0E-4F || stateIn.isCollisionShapeOpaque(blockReaderIn, posIn)));
                 break;
             case SOUTH:
-                p_217633_7_.set(1, f >= 1.0E-4F || f1 >= 1.0E-4F || f3 <= 0.9999F || f4 <= 0.9999F);
-                p_217633_7_.set(0, f2 == f5 && (f5 > 0.9999F || p_217633_2_.func_224756_o(p_217633_1_, p_217633_3_)));
+                boundsFlags.set(1, f >= 1.0E-4F || f1 >= 1.0E-4F || f3 <= 0.9999F || f4 <= 0.9999F);
+                boundsFlags.set(0, f2 == f5 && (f5 > 0.9999F || stateIn.isCollisionShapeOpaque(blockReaderIn, posIn)));
                 break;
             case WEST:
-                p_217633_7_.set(1, f1 >= 1.0E-4F || f2 >= 1.0E-4F || f4 <= 0.9999F || f5 <= 0.9999F);
-                p_217633_7_.set(0, f == f3 && (f < 1.0E-4F || p_217633_2_.func_224756_o(p_217633_1_, p_217633_3_)));
+                boundsFlags.set(1, f1 >= 1.0E-4F || f2 >= 1.0E-4F || f4 <= 0.9999F || f5 <= 0.9999F);
+                boundsFlags.set(0, f == f3 && (f < 1.0E-4F || stateIn.isCollisionShapeOpaque(blockReaderIn, posIn)));
                 break;
             case EAST:
-                p_217633_7_.set(1, f1 >= 1.0E-4F || f2 >= 1.0E-4F || f4 <= 0.9999F || f5 <= 0.9999F);
-                p_217633_7_.set(0, f == f3 && (f3 > 0.9999F || p_217633_2_.func_224756_o(p_217633_1_, p_217633_3_)));
+                boundsFlags.set(1, f1 >= 1.0E-4F || f2 >= 1.0E-4F || f4 <= 0.9999F || f5 <= 0.9999F);
+                boundsFlags.set(0, f == f3 && (f3 > 0.9999F || stateIn.isCollisionShapeOpaque(blockReaderIn, posIn)));
         }
+
     }
 
-    private void renderQuadsFlat(IEnviromentBlockReader p_217636_1_, BlockState p_217636_2_, BlockPos p_217636_3_, int p_217636_4_, boolean p_217636_5_, BufferBuilder p_217636_6_, List<BakedQuad> p_217636_7_, BitSet p_217636_8_) {
-        Vec3d vec3d = p_217636_2_.getOffset(p_217636_1_, p_217636_3_);
-        double d0 = (double) p_217636_3_.getX() + vec3d.x;
-        double d1 = (double) p_217636_3_.getY() + vec3d.y;
-        double d2 = (double) p_217636_3_.getZ() + vec3d.z;
-        int i = 0;
-
-        for (int j = p_217636_7_.size(); i < j; ++i) {
-            BakedQuad bakedquad = p_217636_7_.get(i);
-            if (p_217636_5_) {
-                this.fillQuadBounds(p_217636_1_, p_217636_2_, p_217636_3_, bakedquad.getVertexData(), bakedquad.getFace(), (float[]) null, p_217636_8_);
-                BlockPos blockpos = p_217636_8_.get(0) ? p_217636_3_.offset(bakedquad.getFace()) : p_217636_3_;
-                p_217636_4_ = p_217636_2_.getPackedLightmapCoords(p_217636_1_, blockpos);
+    private void renderQuadsFlat(ILightReader blockAccessIn, BlockState stateIn, BlockPos posIn, int brightnessIn, int combinedOverlayIn, boolean ownBrightness, MatrixStack matrixStackIn, IVertexBuilder buffer, List<BakedQuad> list, BitSet bitSet) {
+        for (BakedQuad bakedquad : list) {
+            if (ownBrightness) {
+                this.fillQuadBounds(blockAccessIn, stateIn, posIn, bakedquad.getVertexData(), bakedquad.getFace(), (float[]) null, bitSet);
+                BlockPos blockpos = bitSet.get(0) ? posIn.offset(bakedquad.getFace()) : posIn;
+                brightnessIn = WorldRenderer.getPackedLightmapCoords(blockAccessIn, stateIn, blockpos);
             }
 
-            p_217636_6_.addVertexData(bakedquad.getVertexData());
-            p_217636_6_.putBrightness4(p_217636_4_, p_217636_4_, p_217636_4_, p_217636_4_);
-            if (bakedquad.hasTintIndex()) {
-                int k = this.blockColors.getColor(p_217636_2_, p_217636_1_, p_217636_3_, bakedquad.getTintIndex());
-                float f = (float) (k >> 16 & 255) / 255.0F;
-                float f1 = (float) (k >> 8 & 255) / 255.0F;
-                float f2 = (float) (k & 255) / 255.0F;
-//                if(bakedquad.shouldApplyDiffuseLighting()) {
-//                    float diffuse = net.minecraftforge.client.model.pipeline.LightUtil.diffuseLight(bakedquad.getFace());
-//                    f *= diffuse;
-//                    f1 *= diffuse;
-//                    f2 *= diffuse;
-//                }
-                p_217636_6_.putColorMultiplier(f, f1, f2, 4);
-                p_217636_6_.putColorMultiplier(f, f1, f2, 3);
-                p_217636_6_.putColorMultiplier(f, f1, f2, 2);
-                p_217636_6_.putColorMultiplier(f, f1, f2, 1);
-            }
-//            else if(bakedquad.shouldApplyDiffuseLighting()) {
-//                float diffuse = net.minecraftforge.client.model.pipeline.LightUtil.diffuseLight(bakedquad.getFace());
-//                p_217636_6_.putColorMultiplier(diffuse, diffuse, diffuse, 4);
-//                p_217636_6_.putColorMultiplier(diffuse, diffuse, diffuse, 3);
-//                p_217636_6_.putColorMultiplier(diffuse, diffuse, diffuse, 2);
-//                p_217636_6_.putColorMultiplier(diffuse, diffuse, diffuse, 1);
-//            }
-
-            p_217636_6_.putPosition(d0, d1, d2);
+            this.renderQuadSmooth(blockAccessIn, stateIn, posIn, buffer, matrixStackIn.getLast(), bakedquad, 1.0F, 1.0F, 1.0F, 1.0F, brightnessIn, brightnessIn, brightnessIn, brightnessIn, combinedOverlayIn);
         }
 
     }
 }
+

@@ -2,20 +2,27 @@ package bret.worldexporter;
 
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
+import com.mojang.blaze3d.matrix.MatrixStack;
 import net.minecraft.block.BlockRenderType;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.client.renderer.BufferBuilder;
-import net.minecraft.client.renderer.RegionRenderCacheBuilder;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.RenderTypeLookup;
+import net.minecraft.client.renderer.WorldRenderer;
+import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.client.renderer.tileentity.TileEntityRenderer;
+import net.minecraft.client.renderer.tileentity.TileEntityRendererDispatcher;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.client.renderer.vertex.VertexFormat;
 import net.minecraft.client.renderer.vertex.VertexFormatElement;
+import net.minecraft.client.settings.AmbientOcclusionStatus;
 import net.minecraft.fluid.IFluidState;
-import net.minecraft.util.BlockRenderLayer;
+import net.minecraft.inventory.container.PlayerContainer;
+import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
-import net.minecraftforge.client.ForgeHooksClient;
 import net.minecraftforge.client.model.ModelDataManager;
 import net.minecraftforge.client.model.data.IModelData;
 import org.apache.commons.lang3.tuple.ImmutablePair;
@@ -34,14 +41,16 @@ import java.util.*;
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
 public class Exporter {
-    protected static final Logger logger = LogManager.getLogger(WorldExporter.MODID);
+    protected static final Logger LOGGER = LogManager.getLogger(WorldExporter.MODID);
     protected final Minecraft mc = Minecraft.getInstance();
-    protected final CustomBlockRendererDispatcher blockRenderer = new CustomBlockRendererDispatcher(mc.getBlockRendererDispatcher().getBlockModelShapes(), mc.getBlockColors());
-    protected final RegionRenderCacheBuilder renderCacheBuilder = new RegionRenderCacheBuilder();
-    protected final boolean[] startedBufferBuilders = new boolean[BlockRenderLayer.values().length];
+    protected final CustomBlockRendererDispatcher blockRendererDispatcher = new CustomBlockRendererDispatcher(mc.getBlockRendererDispatcher().getBlockModelShapes(), mc.getBlockColors());
     protected final BufferedImage atlasImage;
-    protected final Map<BlockRenderLayer, Map<BlockPos, Pair<Integer, Integer>>> layerPosVerticesMap = new HashMap<>();
+    protected final Map<RenderType, Map<BlockPos, Pair<Integer, Integer>>> layerPosVerticesMap = new HashMap<>();
     protected final Map<BlockPos, ArrayList<Quad>> blockQuadsMap = new HashMap<>();
+    protected final Map<RenderType, Map<UUID, Pair<Integer, Integer>>> layerUUIDVerticesMap = new HashMap<>();
+    protected final Map<UUID, ArrayList<Quad>> entityUUIDQuadsMap = new HashMap<>();
+    protected final Map<RenderType, Integer> preCountVertices = new HashMap<>();
+    protected final CustomImpl impl;
     private final int lowerHeightLimit;
     private final int upperHeightLimit;
     private final int playerX;
@@ -51,10 +60,13 @@ public class Exporter {
     private final World world;
     private int currentX;
     private int currentZ;
+    private BlockPos lastBlock;
+    private UUID lastEntityUUID;
+    private boolean lastIsBlock;
 
     public Exporter(ClientPlayerEntity player, int radius, int lower, int upper) {
         // Create entire atlas image as a BufferedImage to be used when exporting
-        int textureId = mc.getTextureMap().getGlTextureId();
+        int textureId = Objects.requireNonNull(mc.getTextureManager().getTexture(PlayerContainer.LOCATION_BLOCKS_TEXTURE)).getGlTextureId();
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, textureId);
         GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
         GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
@@ -70,136 +82,219 @@ public class Exporter {
 
         lowerHeightLimit = lower;
         upperHeightLimit = upper;
-        playerX = (int) player.posX;
-        playerZ = (int) player.posZ;
+        playerX = (int) player.getPosX();
+        playerZ = (int) player.getPosZ();
         startPos = new BlockPos(playerX + radius, upperHeightLimit, playerZ + radius);
         endPos = new BlockPos(playerX - radius, lowerHeightLimit, playerZ - radius);
         world = player.getEntityWorld();
         currentX = startPos.getX();
         currentZ = startPos.getZ();
+
+        impl = new CustomImpl();
+        impl.setFallbackBufferCallback(() -> {
+            int fallbackCount = impl.buffer.vertexCount - preCountVertices.getOrDefault(null, 0);
+            ArrayList<Quad> quadList = null;
+            if (lastIsBlock && lastBlock != null) {
+                quadList = blockQuadsMap.computeIfAbsent(lastBlock, k -> new ArrayList<>());
+            } else if (lastEntityUUID != null) {
+                quadList = entityUUIDQuadsMap.computeIfAbsent(lastEntityUUID, k -> new ArrayList<>());
+            }
+
+            if (quadList != null && fallbackCount > 0) {
+                com.mojang.datafixers.util.Pair<BufferBuilder.DrawState, ByteBuffer> stateBufferPair = impl.buffer.getNextBuffer();
+                BufferBuilder.DrawState drawState = stateBufferPair.getFirst();
+                ByteBuffer bytebuffer = stateBufferPair.getSecond();
+
+                addVertices(bytebuffer, impl.buffer.getVertexFormat().getElements(), quadList, RenderType.getSolid(), 0, drawState.getVertexCount());
+                preCountVertices.remove(null);
+            }
+        });
     }
 
-    protected void addBuilderData(RegionRenderCacheBuilder renderCacheBuilder) {
-        for (int blockRenderLayerId = 0; blockRenderLayerId < BlockRenderLayer.values().length; ++blockRenderLayerId) {
-            BufferBuilder bufferBuilder = renderCacheBuilder.getBuilder(blockRenderLayerId);
-            if (bufferBuilder.getVertexCount() == 0 || bufferBuilder.getDrawMode() != GL11.GL_QUADS) {
+    protected void addAllFinishedData() {
+        Set<RenderType> allTypes = new HashSet<>(layerPosVerticesMap.keySet());
+        allTypes.addAll(layerUUIDVerticesMap.keySet());
+
+        for (RenderType type : allTypes) {
+            BufferBuilder bufferBuilder = impl.getBuffer(type);
+            com.mojang.datafixers.util.Pair<BufferBuilder.DrawState, ByteBuffer> stateBufferPair = bufferBuilder.getNextBuffer();
+            BufferBuilder.DrawState drawState = stateBufferPair.getFirst();
+            VertexFormat format = type.getVertexFormat();
+            if (drawState.getVertexCount() == 0 || drawState.getDrawMode() != GL11.GL_QUADS || !supportedVertexFormat(format)) {
                 continue;
             }
-            VertexFormat vertexFormat = bufferBuilder.getVertexFormat();
-            int vertexByteSize = vertexFormat.getIntegerSize() * 4;
-            ByteBuffer bytebuffer = bufferBuilder.getByteBuffer();
-            List<VertexFormatElement> list = vertexFormat.getElements();
 
-            for (BlockPos pos : layerPosVerticesMap.get(BlockRenderLayer.values()[blockRenderLayerId]).keySet()) {
-                Pair<Integer, Integer> verticesPosCount = layerPosVerticesMap.get(BlockRenderLayer.values()[blockRenderLayerId]).get(pos);
-                int firstVertexBytePos = verticesPosCount.getLeft() * vertexByteSize;
+            ByteBuffer bytebuffer = stateBufferPair.getSecond();
+            for (BlockPos pos : layerPosVerticesMap.getOrDefault(type, Collections.emptyMap()).keySet()) {
+                Pair<Integer, Integer> verticesPosCount = layerPosVerticesMap.get(type).get(pos);
+                int firstVertexBytePos = verticesPosCount.getLeft() * type.getVertexFormat().getSize();
                 int vertexCount = verticesPosCount.getRight();
+                ArrayList<Quad> quadsList = blockQuadsMap.computeIfAbsent(pos, k -> new ArrayList<>());
+                addVertices(bytebuffer, type.getVertexFormat().getElements(), quadsList, type, firstVertexBytePos, vertexCount);
+            }
 
-                if (vertexCount == 0) {
-                    continue;
-                }
+            for (UUID uuid : layerUUIDVerticesMap.getOrDefault(type, Collections.emptyMap()).keySet()) {
+                Pair<Integer, Integer> verticesPosCount = layerUUIDVerticesMap.get(type).get(uuid);
+                int firstVertexBytePos = verticesPosCount.getLeft() * type.getVertexFormat().getSize();
+                int vertexCount = verticesPosCount.getRight();
+                ArrayList<Quad> quadsList = entityUUIDQuadsMap.computeIfAbsent(uuid, k -> new ArrayList<>());
+                addVertices(bytebuffer, type.getVertexFormat().getElements(), quadsList, type, firstVertexBytePos, vertexCount);
+            }
+        }
+    }
 
-                Quad quad = new Quad(BlockRenderLayer.values()[blockRenderLayerId]);
-                boolean skipQuad = false;
-                bytebuffer.position(firstVertexBytePos);
-                for (int vertexNum = 0; vertexNum < vertexCount; ++vertexNum) {
-                    if (skipQuad) {
-                        vertexNum += 4 - (vertexNum - 1) % 4;
-                        if (vertexNum >= vertexCount) break;
-                        bytebuffer.position(bytebuffer.position() + (4 - ((vertexNum - 1) % 4)));
-                        quad = new Quad(BlockRenderLayer.values()[blockRenderLayerId]);
-                        skipQuad = false;
-                    } else if (quad.getCount() == 4) {
-                        blockQuadsMap.computeIfAbsent(pos, k -> new ArrayList<>()).add(quad);
-                        quad = new Quad(BlockRenderLayer.values()[blockRenderLayerId]);
-                    }
+    protected void addVertices(ByteBuffer bytebuffer, List<VertexFormatElement> list, ArrayList<Quad> quadsList, RenderType type, int vertexStartIndex, int vertexCount) {
+        Quad quad = new Quad(type);
+        boolean skipQuad = false;
+        bytebuffer.position(vertexStartIndex);
+        for (int vertexNum = 0; vertexNum < vertexCount; ++vertexNum) {
+            if (skipQuad) {
+                vertexNum += 4 - (vertexNum - 1) % 4;
+                if (vertexNum >= vertexCount) break;
+                bytebuffer.position(bytebuffer.position() + (4 - ((vertexNum - 1) % 4)));
+                quad = new Quad(type);
+                skipQuad = false;
+            } else if (quad.getCount() == 4) {
+                quadsList.add(quad);
+                quad = new Quad(type);
+            }
 
-                    Vertex vertex = new Vertex();
-                    for (VertexFormatElement vertexFormatElement : list) {
-                        VertexFormatElement.Usage vertexElementEnumUsage = vertexFormatElement.getUsage();
-                        switch (vertexElementEnumUsage) {
-                            case POSITION:
-                                if (vertexFormatElement.getType() == VertexFormatElement.Type.FLOAT) {
-                                    vertex.setPosition(new Vector3f(bytebuffer.getFloat(), bytebuffer.getFloat(), bytebuffer.getFloat()));
-                                } else {
-                                    bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
-                                    logger.warn("Vertex position element had no supported type, skipping.");
-                                    continue;
+            Vertex vertex = new Vertex();
+            for (VertexFormatElement vertexFormatElement : list) {
+                VertexFormatElement.Usage vertexElementEnumUsage = vertexFormatElement.getUsage();
+                switch (vertexElementEnumUsage) {
+                    case POSITION:
+                        if (vertexFormatElement.getType() == VertexFormatElement.Type.FLOAT) {
+                            vertex.setPosition(new Vector3f(bytebuffer.getFloat(), bytebuffer.getFloat(), bytebuffer.getFloat()));
+                        } else {
+                            bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
+                            LOGGER.warn("Vertex position element had no supported type, skipping.");
+                            continue;
+                        }
+                        break;
+                    case COLOR:
+                        if (vertexFormatElement.getType() == VertexFormatElement.Type.UBYTE) {
+                            vertex.setColor(bytebuffer.getInt());
+                        } else {
+                            bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
+                            LOGGER.warn("Vertex color element had no supported type, skipping.");
+                            continue;
+                        }
+                        break;
+                    case UV:
+                        switch (vertexFormatElement.getType()) {
+                            case FLOAT:
+                                float u = bytebuffer.getFloat();
+                                float v = bytebuffer.getFloat();
+                                // Check for NaNs
+                                if (u != u || v != v) {
+                                    skipQuad = true;
+                                    LOGGER.warn("Quad being skipped since a vertex had a UV coordinate of NaN.");
+                                    break;
                                 }
-                                break;
-                            case COLOR:
-                                if (vertexFormatElement.getType() == VertexFormatElement.Type.UBYTE) {
-                                    vertex.setColor(bytebuffer.getInt());
-                                } else {
-                                    bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
-                                    logger.warn("Vertex color element had no supported type, skipping.");
-                                    continue;
-                                }
-                                break;
-                            case UV:
-                                switch (vertexFormatElement.getType()) {
-                                    case FLOAT:
-                                        float u = bytebuffer.getFloat();
-                                        float v = bytebuffer.getFloat();
-                                        // Check for NaNs
-                                        if (u != u || v != v) {
-                                            skipQuad = true;
-                                            logger.warn("Quad being skipped since a vertex had a UV coordinate of NaN.");
-                                            break;
-                                        }
 
-                                        if (u > 1.0f || u < 0 || v > 1.0f || v < 0) {
-                                            skipQuad = true;
-                                            logger.warn("Quad being skipped because UV was out of bounds on add.");
-                                            break;
-                                        }
-
-                                        vertex.setUv(new Vector2f(u, v));
-                                        break;
-                                    case SHORT:
-                                        // TODO: ensure value / 16 / (2^16 - 1) gives proper 0-1 float range
-                                        //  Minecraft.getMinecraft().getTextureManager().getTexture(new ResourceLocation( "minecraft", "dynamic/lightmap_1"))
-                                        //  Discard first short (sky light) and only use second (block light) when implementing emissive lighting?
-                                        vertex.setUvlight(new Vector2f(bytebuffer.getShort() / 65520.0f, bytebuffer.getShort() / 65520.0f));
-                                        break;
-                                    default:
-                                        bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
-                                        logger.warn("Vertex UV element had no supported type, skipping.");
-                                        continue;
+                                if (u > 1.0f || u < 0 || v > 1.0f || v < 0) {
+                                    skipQuad = true;
+                                    LOGGER.warn("Quad being skipped because UV was out of bounds on add.");
+                                    break;
                                 }
+
+                                vertex.setUv(new Vector2f(u, v));
                                 break;
-                            case PADDING:
-                            case NORMAL:
+                            case SHORT:
+                                // TODO: ensure value / 16 / (2^16 - 1) gives proper 0-1 float range
+                                //  Minecraft.getMinecraft().getTextureManager().getTexture(new ResourceLocation( "minecraft", "dynamic/lightmap_1"))
+                                //  Discard first short (sky light) and only use second (block light) when implementing emissive lighting?
+                                if (vertexFormatElement.getIndex() == DefaultVertexFormats.TEX_2SB.getIndex()) {
+                                    vertex.setUvlight(new Vector2f(bytebuffer.getShort() / 65520.0f, bytebuffer.getShort() / 65520.0f));
+                                }
+//                               else if (vertexFormatElement.getIndex() == DefaultVertexFormats.TEX_2S.getIndex()) {  // TODO: determine what index 1 (TEX_2S) is used for in entity rendering
+//
+//                               }
+                                break;
                             default:
                                 bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
+                                LOGGER.warn("Vertex UV element had no supported type, skipping.");
+                                continue;
                         }
-                    }
-
-                    if (!skipQuad) {
-                        quad.addVertex(vertex);
-                    }
-                }
-
-                // add the last quad
-                if (quad.getCount() == 4 && !skipQuad) {
-                    blockQuadsMap.computeIfAbsent(pos, k -> new ArrayList<>()).add(quad);
+                        break;
+                    case PADDING:
+                    case NORMAL:
+                    default:
+                        bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
                 }
             }
+
+            if (!skipQuad) {
+                quad.addVertex(vertex);
+            }
+        }
+
+        // add the last quad
+        if (quad.getCount() == 4 && !skipQuad) {
+            quadsList.add(quad);
         }
     }
 
     // Resets bufferBuilders, offsets, and all internal quad lists
     protected void resetBuilders() {
-        Arrays.fill(startedBufferBuilders, false);
-        for (BlockRenderLayer blockRenderLayer : BlockRenderLayer.values()) {
-            int blockRenderLayerId = blockRenderLayer.ordinal();
-            BufferBuilder bufferBuilder = renderCacheBuilder.getBuilder(blockRenderLayerId);
-            bufferBuilder.setTranslation(-playerX, 0, -playerZ);
-            bufferBuilder.reset();
+        for (RenderType type : layerPosVerticesMap.keySet()) {
+            impl.getBuffer(type).discard();
+        }
+
+        for (RenderType type : layerUUIDVerticesMap.keySet()) {
+            impl.getBuffer(type).discard();
         }
 
         layerPosVerticesMap.clear();
         blockQuadsMap.clear();
+        layerUUIDVerticesMap.clear();
+        entityUUIDQuadsMap.clear();
+        preCountVertices.clear();
+    }
+
+    protected void preCountLayerVertices() {
+        preCountVertices.clear();
+
+        // fallback buffer count, key of null, since it has no type
+        preCountVertices.put(null, impl.buffer.vertexCount);  // null refers to the fallback bufferBuilder, which has no type
+
+        // loop over Impl renderTypes, get buffer, get vertex count from that, and store it
+        for (RenderType type : impl.fixedBuffers.keySet()) {
+            preCountVertices.put(type, impl.getBuffer(type).vertexCount);
+        }
+
+    }
+
+    protected void postCountLayerVertices() {
+        // post counting and data handling for fallback buffer is handled with callback in CustomImpl.finish()
+
+        // loop over Impl renderTypes, get buffer, get vertex count from that, and store the difference from pre count
+        for (RenderType type : impl.fixedBuffers.keySet()) {
+            int prevCount = preCountVertices.get(type);
+            int difference = impl.getBuffer(type).vertexCount - prevCount;
+            if (difference == 0) continue;
+
+            if (lastIsBlock) {
+                layerPosVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastBlock, new ImmutablePair<>(prevCount, difference));
+            } else {
+                layerUUIDVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastEntityUUID, new ImmutablePair<>(prevCount, difference));
+            }
+        }
+    }
+
+    private void preEntity(UUID entityUUID) {
+        lastIsBlock = false;
+        lastEntityUUID = entityUUID;
+    }
+
+    private void preBlock(BlockPos pos) {
+        lastIsBlock = true;
+        lastBlock = pos;
+    }
+
+    private boolean supportedVertexFormat(VertexFormat format) {
+        return format == DefaultVertexFormats.BLOCK || format == DefaultVertexFormats.ENTITY;
     }
 
     public boolean getNextChunkData() {
@@ -208,6 +303,8 @@ public class Exporter {
         }
 
         resetBuilders();
+        AmbientOcclusionStatus pre = mc.gameSettings.ambientOcclusionStatus;
+        mc.gameSettings.ambientOcclusionStatus = AmbientOcclusionStatus.OFF;
 
         // ((a % b) + b) % b gives true modulus instead of just remainder
         int chunkXOffset = ((currentX % 16) + 16) % 16;
@@ -215,67 +312,62 @@ public class Exporter {
         BlockPos thisChunkStart = new BlockPos(currentX, upperHeightLimit, currentZ);
         BlockPos thisChunkEnd = new BlockPos(Math.max(currentX - chunkXOffset, endPos.getX()), lowerHeightLimit, Math.max(currentZ - chunkZOffset, endPos.getZ()));
         Random random = new Random();
+        MatrixStack matrixStack = new MatrixStack();
+        matrixStack.translate(-playerX, 0, -playerZ);
+
         for (BlockPos pos : BlockPos.getAllInBoxMutable(thisChunkStart, thisChunkEnd)) {
             BlockState state = world.getBlockState(pos);
             if (state.getBlock().isAir(state, world, pos)) {
                 continue;
             }
 
+            preCountLayerVertices();
+            preBlock(pos.toImmutable());
+
+            if (state.hasTileEntity()) {
+                TileEntity tileentity = world.getChunkAt(pos).getTileEntity(pos);
+                if (tileentity != null) {
+//                    TileEntityRendererDispatcher.instance.renderTileEntity(tileentity, partialTicks, matrixStack, );
+                    TileEntityRenderer<TileEntity> tileEntityRenderer = TileEntityRendererDispatcher.instance.getRenderer(tileentity);
+                    int i = WorldRenderer.getCombinedLight(world, tileentity.getPos());
+                    if (tileEntityRenderer != null) {
+                        matrixStack.push();
+//                        matrixStack.translate(pos.getX(), pos.getY(), pos.getZ());  // TODO: check this
+                        float partialTicks = 0;
+                        tileEntityRenderer.render(tileentity, partialTicks, matrixStack, impl, i, OverlayTexture.NO_OVERLAY);
+                        matrixStack.pop();
+                    }
+                }
+            }
+
             IFluidState ifluidstate = world.getFluidState(pos);
             IModelData modelData = ModelDataManager.getModelData(world, pos);
-            for (BlockRenderLayer blockrenderlayer1 : BlockRenderLayer.values()) {
-                if (!ifluidstate.canRenderInLayer(blockrenderlayer1) && !state.canRenderInLayer(blockrenderlayer1)) {
-                    continue;
+            for (RenderType rendertype : RenderType.getBlockRenderTypes()) {
+                if (!ifluidstate.isEmpty() && RenderTypeLookup.canRenderInLayer(ifluidstate, rendertype)) {
+                    BufferBuilder bufferbuilder = impl.getBuffer(rendertype);  // automatically starts buffer
+                    blockRendererDispatcher.renderFluid(pos, world, bufferbuilder, ifluidstate, playerX, playerZ);
                 }
 
-                int blockRenderLayerId = blockrenderlayer1.ordinal();
-                net.minecraftforge.client.ForgeHooksClient.setRenderLayer(blockrenderlayer1);
-                BufferBuilder bufferbuilder = renderCacheBuilder.getBuilder(blockRenderLayerId);
-                int vertexCountPre = bufferbuilder.getVertexCount();
-
-                if (!ifluidstate.isEmpty() && ifluidstate.canRenderInLayer(blockrenderlayer1)) {
-                    if (!startedBufferBuilders[blockRenderLayerId]) {
-                        startedBufferBuilders[blockRenderLayerId] = true;
-                        bufferbuilder.begin(GL11.GL_QUADS, DefaultVertexFormats.BLOCK);
-                    }
-
-                    try {
-                        blockRenderer.renderFluid(pos, world, bufferbuilder, ifluidstate);
-                    } catch (Exception exception) {
-                        logger.warn("Unable to render block: " + state.getBlock() + "      with position: " + pos + "\n" + exception);
-                    }
+                if (state.getRenderType() != BlockRenderType.INVISIBLE && RenderTypeLookup.canRenderInLayer(state, rendertype)) {
+                    BufferBuilder bufferbuilder2 = impl.getBuffer(rendertype);   // automatically starts buffer
+                    matrixStack.push();
+                    matrixStack.translate(pos.getX(), pos.getY(), pos.getZ());
+                    blockRendererDispatcher.renderModel(state, pos, world, matrixStack, bufferbuilder2, true, random, modelData);
+                    matrixStack.pop();
                 }
 
-                // note: may need to check if modelData == null in the future, but it is unused at the moment
-                if (state.getRenderType() != BlockRenderType.INVISIBLE && state.canRenderInLayer(blockrenderlayer1)) {
-                    if (!startedBufferBuilders[blockRenderLayerId]) {
-                        startedBufferBuilders[blockRenderLayerId] = true;
-                        bufferbuilder.begin(GL11.GL_QUADS, DefaultVertexFormats.BLOCK);
-                    }
-
-                    try {
-                        blockRenderer.renderBlock(state, pos, world, bufferbuilder, random, modelData);
-                    } catch (Exception exception) {
-                        logger.warn("Unable to render block: " + state.getBlock() + "      with position: " + pos + "\n" + exception);
-                    }
-                }
-
-                int addedVertexCount = bufferbuilder.getVertexCount() - vertexCountPre;
-                if (addedVertexCount > 0) {
-                    layerPosVerticesMap.computeIfAbsent(blockrenderlayer1, k -> new HashMap<>()).put(pos.toImmutable(), new ImmutablePair<>(vertexCountPre, addedVertexCount));
-                }
             }
-            ForgeHooksClient.setRenderLayer(null);
+
+            postCountLayerVertices();
         }
 
-        for (int blockRenderLayerId = 0; blockRenderLayerId < startedBufferBuilders.length; ++blockRenderLayerId) {
-            if (!startedBufferBuilders[blockRenderLayerId]) {
-                continue;
-            }
-            renderCacheBuilder.getBuilder(blockRenderLayerId).finishDrawing();
-        }
+        // TODO: loop over world.getAllEntities() here
 
-        addBuilderData(renderCacheBuilder);
+
+        // finish all builders that were drawing, then add the data
+        impl.finish();
+        addAllFinishedData();
+        mc.gameSettings.ambientOcclusionStatus = pre;
 
         // Update the current position to be the starting position of the next chunk export (which may be
         // outside the selected boundary, accounted for at the beginning of the function call).

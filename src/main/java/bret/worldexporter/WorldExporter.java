@@ -11,7 +11,6 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 
-// TODO: use ClientChatEvent to allow the mod to function client-only
 @Mod(WorldExporter.MODID)
 public class WorldExporter {
     public static final String MODID = "worldexporter";

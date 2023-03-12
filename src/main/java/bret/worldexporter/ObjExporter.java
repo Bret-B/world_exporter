@@ -4,7 +4,8 @@ import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
-import net.minecraft.util.BlockRenderLayer;
+import net.minecraft.client.renderer.Atlases;
+import net.minecraft.client.renderer.RenderType;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 
@@ -19,120 +20,22 @@ import java.nio.file.Files;
 import java.util.*;
 
 public class ObjExporter extends Exporter {
+    private static final Map<RenderType, Integer> renderOrder = new HashMap<RenderType, Integer>() {{
+        put(RenderType.getSolid(), 0);
+        put(Atlases.getSolidBlockType(), 0);
+        put(RenderType.getCutout(), 1);
+        put(Atlases.getCutoutBlockType(), 1);
+        put(RenderType.getCutoutMipped(), 2);
+        put(Atlases.getCutoutBlockType(), 2);
+        put(RenderType.getTranslucent(), Integer.MAX_VALUE);
+        put(Atlases.getTranslucentBlockType(), Integer.MAX_VALUE);
+    }};
     private final ArrayList<Quad> allQuads = new ArrayList<>();
     private final Map<UVBounds, Float> uvTransparencyCache = new HashMap<>();
     private final Comparator<Quad> quadComparator = getQuadSort();
 
     public ObjExporter(ClientPlayerEntity player, int radius, int lower, int upper) {
         super(player, radius, lower, upper);
-    }
-
-    private void removeDuplicateQuads() {
-        for (ArrayList<Quad> quads : blockQuadsMap.values()) {
-            Set<Integer> added = new HashSet<>();
-            ArrayList<Quad> uniqueQuads = new ArrayList<>();
-            for (int i = 0; i < quads.size(); ++i) {
-                if (added.contains(i)) {
-                    continue;
-                }
-
-                Quad q1 = quads.get(i);
-                uniqueQuads.add(q1);
-                added.add(i);
-
-                for (int j = i + 1; j < quads.size(); ++j) {
-                    if (added.contains(j)) {
-                        continue;
-                    }
-
-                    if (q1.isEquivalentTo(quads.get(j))) {
-                        added.add(j);  // treat the quad as already added since it is equivalent to one that has already been added
-                    }
-                }
-            }
-
-            quads.clear();
-            quads.addAll(uniqueQuads);
-        }
-    }
-
-    // update any quads that overlap by translating by a small multiple of their normal
-    private void fixOverlaps() {
-        removeDuplicateQuads();
-        for (ArrayList<Quad> quads : blockQuadsMap.values()) {
-            sortQuads(quads);
-            Set<Integer> toCheck = new HashSet<>();
-            for (int i = 0, size = quads.size(); i < size; ++i) {
-                toCheck.add(i);
-            }
-            boolean reCheck = !toCheck.isEmpty();
-            while (reCheck) {
-                Set<Integer> newToCheck = new HashSet<>();
-                for (int quadIndex : toCheck) {
-                    Quad first = quads.get(quadIndex);
-                    ArrayList<Integer> overlapsWithFirst = new ArrayList<>();
-                    for (int j = quadIndex + 1; j < quads.size(); ++j) {
-                        if (first.overlaps(quads.get(j))) {
-                            overlapsWithFirst.add(j);
-                        }
-                    }
-
-                    if (overlapsWithFirst.isEmpty()) {
-                        continue;
-                    }
-
-                    Vector3f posTranslate = (Vector3f) first.getNormal().scale(0.00075f);
-                    for (int overlapQuad : overlapsWithFirst) {
-                        quads.get(overlapQuad).translate(posTranslate);
-                        newToCheck.add(overlapQuad);
-                    }
-                }
-
-                reCheck = !newToCheck.isEmpty();
-                toCheck = newToCheck;
-            }
-
-            allQuads.addAll(quads);
-        }
-    }
-
-    // returns a String of relevant .obj file lines that represent the quad
-    private String quadToObj(Quad quad, int vertCount, int uvCount) {
-        StringBuilder result = new StringBuilder();
-        for (int i = 0; i < 4; ++i) {
-            Vertex vertex = quad.getVertices()[i];
-            Vector3f position = vertex.getPosition();
-
-            // scale global texture atlas UV coordinates to single texture image based UV coordinates (and flip the V)
-            Vector2f uv = vertex.getUv();
-            UVBounds uvBounds = quad.getUvBounds();
-            uv.x = (uv.x - uvBounds.uMin) / uvBounds.uDist();
-            uv.y = 1 - ((uv.y - uvBounds.vMin) / uvBounds.vDist());
-
-            result.append("v ").append(position.x).append(' ').append(position.y).append(' ').append(position.z).append('\n');
-            result.append("vt ").append(uv.x).append(' ').append(uv.y).append('\n');
-        }
-
-        result.append("f ").append(vertCount).append('/').append(uvCount).append(' ');
-        result.append(vertCount + 1).append('/').append(uvCount + 1).append(' ');
-        result.append(vertCount + 2).append('/').append(uvCount + 2).append(' ');
-        result.append(vertCount + 3).append('/').append(uvCount + 3).append("\n\n");
-
-        return result.toString();
-    }
-
-    private void writeTexture(File outputFile, BufferedImage image) {
-        String outputFileStr = outputFile.toString();
-        int slashIndex = outputFileStr.lastIndexOf(File.separatorChar);
-        slashIndex = slashIndex != -1 ? slashIndex : outputFileStr.length();
-        String fullRelativeDirectory = outputFileStr.substring(0, slashIndex);  // substring end is exclusive
-
-        try {
-            Files.createDirectories(new File(fullRelativeDirectory).toPath());
-            ImageIO.write(image, "png", outputFile);
-        } catch (IOException e) {
-            logger.debug("Could not save resource texture: " + outputFile);
-        }
     }
 
     public void export(String objFilenameIn, String mtlFilenameIn) throws IOException {
@@ -152,7 +55,12 @@ public class ObjExporter extends Exporter {
             objbw.write("mtllib " + mtlFilenameIn + "\n\n");
 
             while (getNextChunkData()) {
-                fixOverlaps();
+                // fix quad data issues and add to allQuads
+                fixOverlaps(blockQuadsMap.values());
+                fixOverlaps(entityUUIDQuadsMap.values());
+                blockQuadsMap.values().forEach(allQuads::addAll);
+                entityUUIDQuadsMap.values().forEach(allQuads::addAll);
+
                 Map<Integer, ArrayList<Quad>> quadsForModel = new HashMap<>();
                 for (Quad quad : allQuads) {
                     Pair<UVBounds, Integer> model = new ImmutablePair<>(quad.getUvBounds(), quad.getColor());
@@ -205,7 +113,113 @@ public class ObjExporter extends Exporter {
                 allQuads.clear();
             }
         } catch (IOException e) {
-            logger.debug("Unable to export world data");
+            LOGGER.debug("Unable to export world data");
+        }
+    }
+
+    private void removeDuplicateQuads(Collection<ArrayList<Quad>> quadsArrays) {
+        for (ArrayList<Quad> quads : quadsArrays) {
+            Set<Integer> added = new HashSet<>();
+            ArrayList<Quad> uniqueQuads = new ArrayList<>();
+            for (int i = 0; i < quads.size(); ++i) {
+                if (added.contains(i)) {
+                    continue;
+                }
+
+                Quad q1 = quads.get(i);
+                uniqueQuads.add(q1);
+                added.add(i);
+
+                for (int j = i + 1; j < quads.size(); ++j) {
+                    if (added.contains(j)) {
+                        continue;
+                    }
+
+                    if (q1.isEquivalentTo(quads.get(j))) {
+                        added.add(j);  // treat the quad as already added since it is equivalent to one that has already been added
+                    }
+                }
+            }
+
+            quads.clear();
+            quads.addAll(uniqueQuads);
+        }
+    }
+
+    // update any quads that overlap by translating by a small multiple of their normal
+    private void fixOverlaps(Collection<ArrayList<Quad>> quadsArrays) {
+        removeDuplicateQuads(quadsArrays);
+        for (ArrayList<Quad> quads : quadsArrays) {
+            sortQuads(quads);
+            Set<Integer> toCheck = new HashSet<>();
+            for (int i = 0, size = quads.size(); i < size; ++i) {
+                toCheck.add(i);
+            }
+            boolean reCheck = !toCheck.isEmpty();
+            while (reCheck) {
+                Set<Integer> newToCheck = new HashSet<>();
+                for (int quadIndex : toCheck) {
+                    Quad first = quads.get(quadIndex);
+                    ArrayList<Integer> overlapsWithFirst = new ArrayList<>();
+                    for (int j = quadIndex + 1; j < quads.size(); ++j) {
+                        if (first.overlaps(quads.get(j))) {
+                            overlapsWithFirst.add(j);
+                        }
+                    }
+
+                    if (overlapsWithFirst.isEmpty()) {
+                        continue;
+                    }
+
+                    Vector3f posTranslate = (Vector3f) first.getNormal().scale(0.00075f);
+                    for (int overlapQuad : overlapsWithFirst) {
+                        quads.get(overlapQuad).translate(posTranslate);
+                        newToCheck.add(overlapQuad);
+                    }
+                }
+
+                reCheck = !newToCheck.isEmpty();
+                toCheck = newToCheck;
+            }
+        }
+    }
+
+    // returns a String of relevant .obj file lines that represent the quad
+    private String quadToObj(Quad quad, int vertCount, int uvCount) {
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < 4; ++i) {
+            Vertex vertex = quad.getVertices()[i];
+            Vector3f position = vertex.getPosition();
+
+            // scale global texture atlas UV coordinates to single texture image based UV coordinates (and flip the V)
+            Vector2f uv = vertex.getUv();
+            UVBounds uvBounds = quad.getUvBounds();
+            float u = (uv.x - uvBounds.uMin) / uvBounds.uDist();
+            float v = 1 - ((uv.y - uvBounds.vMin) / uvBounds.vDist());
+
+            result.append("v ").append(position.x).append(' ').append(position.y).append(' ').append(position.z).append('\n');
+            result.append("vt ").append(u).append(' ').append(v).append('\n');
+        }
+
+        result.append("f ").append(vertCount).append('/').append(uvCount).append(' ');
+        result.append(vertCount + 1).append('/').append(uvCount + 1).append(' ');
+        result.append(vertCount + 2).append('/').append(uvCount + 2).append(' ');
+        result.append(vertCount + 3).append('/').append(uvCount + 3).append("\n\n");
+
+        return result.toString();
+    }
+
+    private void writeTexture(File outputFile, BufferedImage image) {
+        String outputFileStr = outputFile.toString();
+        int slashIndex = outputFileStr.lastIndexOf(File.separatorChar);
+        slashIndex = slashIndex != -1 ? slashIndex : outputFileStr.length();
+        String fullRelativeDirectory = outputFileStr.substring(0, slashIndex);  // substring end is exclusive
+
+        try {
+            Files.createDirectories(new File(fullRelativeDirectory).toPath());
+            ImageIO.write(image, "png", outputFile);
+        } catch (IOException e) {
+            LOGGER.debug("Could not save resource texture: " + outputFile);
         }
     }
 
@@ -218,7 +232,7 @@ public class ObjExporter extends Exporter {
         try {
             textureImg = atlasImage.getSubimage(startX, startY, width, height);
         } catch (RasterFormatException exception) {
-            logger.warn("Unable to get the texture for uvbounds: " + width + "w, " + height + "h, " + startX + "x, " + startY + "y, " + "with Uv bounds: " +
+            LOGGER.warn("Unable to get the texture for uvbounds: " + width + "w, " + height + "h, " + startX + "x, " + startY + "y, " + "with Uv bounds: " +
                     String.join(",", String.valueOf(uvbound.uMin), String.valueOf(uvbound.uMax), String.valueOf(uvbound.vMin), String.valueOf(uvbound.vMax)));
         }
         if (textureImg != null && color != -1) {
@@ -233,14 +247,14 @@ public class ObjExporter extends Exporter {
 
     private Comparator<Quad> getQuadSort() {
         return (quad1, quad2) -> {
-            BlockRenderLayer quad1Layer = quad1.getType();
-            BlockRenderLayer quad2Layer = quad2.getType();
+            RenderType quad1Layer = quad1.getType();
+            RenderType quad2Layer = quad2.getType();
             if (quad1Layer == quad2Layer) {
                 float avg1 = uvTransparencyCache.computeIfAbsent(quad1.getUvBounds(), k -> ImgUtils.averageTransparencyValue(getImageFromUV(quad1.getUvBounds(), -1)));
                 float avg2 = uvTransparencyCache.computeIfAbsent(quad2.getUvBounds(), k -> ImgUtils.averageTransparencyValue(getImageFromUV(quad2.getUvBounds(), -1)));
                 return Float.compare(avg1, avg2);
             } else {
-                return quad1Layer.compareTo(quad2Layer);
+                return Integer.compare(renderOrder.getOrDefault(quad1Layer, 3), renderOrder.getOrDefault(quad2Layer, 3));
             }
         };
     }

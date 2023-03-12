@@ -3,7 +3,7 @@ package bret.worldexporter;
 import bret.worldexporter.legacylwjgl.Matrix3f;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
-import net.minecraft.util.BlockRenderLayer;
+import net.minecraft.client.renderer.RenderType;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -13,11 +13,12 @@ public class Quad {
     private static final float TOLERANCE = 0.0001f;
     private static final Vector3f DESIRED_NORM = new Vector3f(0, 0, 1);
     private final Vertex[] vertices = new Vertex[4];
-    private final BlockRenderLayer type;
+    private final RenderType type;
+
     private int count = 0;
     private UVBounds uvBounds;
 
-    public Quad(BlockRenderLayer renderType) {
+    public Quad(RenderType renderType) {
         type = renderType;
     }
 
@@ -111,7 +112,7 @@ public class Quad {
         return vertices[0].getColor();
     }
 
-    public BlockRenderLayer getType() {
+    public RenderType getType() {
         return type;
     }
 
