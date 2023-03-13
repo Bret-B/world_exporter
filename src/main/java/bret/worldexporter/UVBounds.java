@@ -18,6 +18,16 @@ public class UVBounds {
         this.vMax = other.vMax;
     }
 
+    public UVBounds clamped() {
+        UVBounds clampedBounds = new UVBounds();
+        clampedBounds.uMin = Math.max(0.0F, this.uMin);
+        clampedBounds.uMax = Math.min(1.0F, this.uMax);
+        clampedBounds.vMin = Math.max(0.0F, this.vMin);
+        clampedBounds.vMax = Math.min(1.0F, this.vMax);
+
+        return clampedBounds;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

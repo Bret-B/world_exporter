@@ -21,11 +21,11 @@ import net.minecraft.client.settings.AmbientOcclusionStatus;
 import net.minecraft.fluid.IFluidState;
 import net.minecraft.inventory.container.PlayerContainer;
 import net.minecraft.tileentity.TileEntity;
+import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.minecraftforge.client.model.ModelDataManager;
 import net.minecraftforge.client.model.data.IModelData;
-import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -44,12 +44,13 @@ public class Exporter {
     protected static final Logger LOGGER = LogManager.getLogger(WorldExporter.MODID);
     protected final Minecraft mc = Minecraft.getInstance();
     protected final CustomBlockRendererDispatcher blockRendererDispatcher = new CustomBlockRendererDispatcher(mc.getBlockRendererDispatcher().getBlockModelShapes(), mc.getBlockColors());
-    protected final BufferedImage atlasImage;
+    protected final Map<ResourceLocation, BufferedImage> atlasCacheMap = new HashMap<>();
     protected final Map<RenderType, Map<BlockPos, Pair<Integer, Integer>>> layerPosVerticesMap = new HashMap<>();
     protected final Map<BlockPos, ArrayList<Quad>> blockQuadsMap = new HashMap<>();
     protected final Map<RenderType, Map<UUID, Pair<Integer, Integer>>> layerUUIDVerticesMap = new HashMap<>();
     protected final Map<UUID, ArrayList<Quad>> entityUUIDQuadsMap = new HashMap<>();
     protected final Map<RenderType, Integer> preCountVertices = new HashMap<>();
+    protected final Map<RenderType, ResourceLocation> renderResourceLocationMap = new HashMap<>();
     protected final CustomImpl impl;
     private final int lowerHeightLimit;
     private final int upperHeightLimit;
@@ -65,21 +66,7 @@ public class Exporter {
     private boolean lastIsBlock;
 
     public Exporter(ClientPlayerEntity player, int radius, int lower, int upper) {
-        // Create entire atlas image as a BufferedImage to be used when exporting
-        int textureId = Objects.requireNonNull(mc.getTextureManager().getTexture(PlayerContainer.LOCATION_BLOCKS_TEXTURE)).getGlTextureId();
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, textureId);
-        GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
-        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
-        int atlasWidth = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_WIDTH);
-        int atlasHeight = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_HEIGHT);
-        int size = atlasWidth * atlasHeight;
-        atlasImage = new BufferedImage(atlasWidth, atlasHeight, TYPE_INT_ARGB);
-        IntBuffer buffer = BufferUtils.createIntBuffer(size);
-        int[] data = new int[size];
-        GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, GL12.GL_BGRA, GL12.GL_UNSIGNED_INT_8_8_8_8_REV, buffer);
-        buffer.get(data);
-        atlasImage.setRGB(0, 0, atlasWidth, atlasHeight, data, 0, atlasWidth);
-
+        atlasCacheMap.put(null, computeImage(PlayerContainer.LOCATION_BLOCKS_TEXTURE));
         lowerHeightLimit = lower;
         upperHeightLimit = upper;
         playerX = (int) player.getPosX();
@@ -90,9 +77,11 @@ public class Exporter {
         currentX = startPos.getX();
         currentZ = startPos.getZ();
 
-        impl = new CustomImpl();
+        impl = new CustomImpl(renderResourceLocationMap);
         impl.setFallbackBufferCallback(() -> {
             int fallbackCount = impl.buffer.vertexCount - preCountVertices.getOrDefault(null, 0);
+            preCountVertices.remove(null);
+            impl.buffer.finishDrawing();
             ArrayList<Quad> quadList = null;
             if (lastIsBlock && lastBlock != null) {
                 quadList = blockQuadsMap.computeIfAbsent(lastBlock, k -> new ArrayList<>());
@@ -105,10 +94,31 @@ public class Exporter {
                 BufferBuilder.DrawState drawState = stateBufferPair.getFirst();
                 ByteBuffer bytebuffer = stateBufferPair.getSecond();
 
-                addVertices(bytebuffer, impl.buffer.getVertexFormat().getElements(), quadList, RenderType.getSolid(), 0, drawState.getVertexCount());
-                preCountVertices.remove(null);
+                if (drawState.getVertexCount() == 0 || drawState.getDrawMode() != GL11.GL_QUADS || !supportedVertexFormat(drawState.getFormat())) {
+                    return;
+                }
+
+                addVertices(bytebuffer, impl.buffer.getVertexFormat().getElements(), quadList, impl.lastRenderType.orElse(null), 0, drawState.getVertexCount());
             }
         });
+    }
+
+    public static BufferedImage computeImage(ResourceLocation resource) {
+        int textureId = Objects.requireNonNull(Minecraft.getInstance().getTextureManager().getTexture(resource)).getGlTextureId();
+//        int textureId = Objects.requireNonNull(Minecraft.getInstance().getModelManager().getAtlasTexture(resource)).getGlTextureId();
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, textureId);
+        GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
+        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
+        int atlasWidth = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_WIDTH);
+        int atlasHeight = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_HEIGHT);
+        int size = atlasWidth * atlasHeight;
+        BufferedImage atlasImage = new BufferedImage(atlasWidth, atlasHeight, TYPE_INT_ARGB);
+        IntBuffer buffer = BufferUtils.createIntBuffer(size);
+        int[] data = new int[size];
+        GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, GL12.GL_BGRA, GL12.GL_UNSIGNED_INT_8_8_8_8_REV, buffer);
+        buffer.get(data);
+        atlasImage.setRGB(0, 0, atlasWidth, atlasHeight, data, 0, atlasWidth);
+        return atlasImage;
     }
 
     protected void addAllFinishedData() {
@@ -116,7 +126,7 @@ public class Exporter {
         allTypes.addAll(layerUUIDVerticesMap.keySet());
 
         for (RenderType type : allTypes) {
-            BufferBuilder bufferBuilder = impl.getBuffer(type);
+            BufferBuilder bufferBuilder = impl.getBufferRaw(type);
             com.mojang.datafixers.util.Pair<BufferBuilder.DrawState, ByteBuffer> stateBufferPair = bufferBuilder.getNextBuffer();
             BufferBuilder.DrawState drawState = stateBufferPair.getFirst();
             VertexFormat format = type.getVertexFormat();
@@ -144,19 +154,20 @@ public class Exporter {
     }
 
     protected void addVertices(ByteBuffer bytebuffer, List<VertexFormatElement> list, ArrayList<Quad> quadsList, RenderType type, int vertexStartIndex, int vertexCount) {
-        Quad quad = new Quad(type);
+        ResourceLocation resource = renderResourceLocationMap.getOrDefault(type, null);
+        Quad quad = new Quad(type, resource);
         boolean skipQuad = false;
         bytebuffer.position(vertexStartIndex);
         for (int vertexNum = 0; vertexNum < vertexCount; ++vertexNum) {
             if (skipQuad) {
-                vertexNum += 4 - (vertexNum - 1) % 4;
+                vertexNum += 4 - (vertexNum - 1) % 4;  // TODO: test this
                 if (vertexNum >= vertexCount) break;
                 bytebuffer.position(bytebuffer.position() + (4 - ((vertexNum - 1) % 4)));
-                quad = new Quad(type);
+                quad = new Quad(type, resource);
                 skipQuad = false;
             } else if (quad.getCount() == 4) {
                 quadsList.add(quad);
-                quad = new Quad(type);
+                quad = new Quad(type, resource);
             }
 
             Vertex vertex = new Vertex();
@@ -193,12 +204,6 @@ public class Exporter {
                                     break;
                                 }
 
-                                if (u > 1.0f || u < 0 || v > 1.0f || v < 0) {
-                                    skipQuad = true;
-                                    LOGGER.warn("Quad being skipped because UV was out of bounds on add.");
-                                    break;
-                                }
-
                                 vertex.setUv(new Vector2f(u, v));
                                 break;
                             case SHORT:
@@ -211,6 +216,10 @@ public class Exporter {
 //                               else if (vertexFormatElement.getIndex() == DefaultVertexFormats.TEX_2S.getIndex()) {  // TODO: determine what index 1 (TEX_2S) is used for in entity rendering
 //
 //                               }
+                                else {
+                                    bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
+                                    continue;
+                                }
                                 break;
                             default:
                                 bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
@@ -239,12 +248,18 @@ public class Exporter {
     // Resets bufferBuilders, offsets, and all internal quad lists
     protected void resetBuilders() {
         for (RenderType type : layerPosVerticesMap.keySet()) {
-            impl.getBuffer(type).discard();
+            BufferBuilder buf = impl.getBufferRaw(type);
+            if (buf.isDrawing()) buf.finishDrawing();
+            buf.discard();
         }
 
         for (RenderType type : layerUUIDVerticesMap.keySet()) {
-            impl.getBuffer(type).discard();
+            BufferBuilder buf = impl.getBufferRaw(type);
+            if (buf.isDrawing()) buf.finishDrawing();
+            buf.discard();
         }
+
+        impl.finish();
 
         layerPosVerticesMap.clear();
         blockQuadsMap.clear();
@@ -261,7 +276,7 @@ public class Exporter {
 
         // loop over Impl renderTypes, get buffer, get vertex count from that, and store it
         for (RenderType type : impl.fixedBuffers.keySet()) {
-            preCountVertices.put(type, impl.getBuffer(type).vertexCount);
+            preCountVertices.put(type, impl.getBufferRaw(type).vertexCount);
         }
 
     }
@@ -272,13 +287,13 @@ public class Exporter {
         // loop over Impl renderTypes, get buffer, get vertex count from that, and store the difference from pre count
         for (RenderType type : impl.fixedBuffers.keySet()) {
             int prevCount = preCountVertices.get(type);
-            int difference = impl.getBuffer(type).vertexCount - prevCount;
+            int difference = impl.getBufferRaw(type).vertexCount - prevCount;
             if (difference == 0) continue;
 
             if (lastIsBlock) {
-                layerPosVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastBlock, new ImmutablePair<>(prevCount, difference));
+                layerPosVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastBlock, Pair.of(prevCount, difference));
             } else {
-                layerUUIDVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastEntityUUID, new ImmutablePair<>(prevCount, difference));
+                layerUUIDVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastEntityUUID, Pair.of(prevCount, difference));
             }
         }
     }
@@ -327,12 +342,11 @@ public class Exporter {
             if (state.hasTileEntity()) {
                 TileEntity tileentity = world.getChunkAt(pos).getTileEntity(pos);
                 if (tileentity != null) {
-//                    TileEntityRendererDispatcher.instance.renderTileEntity(tileentity, partialTicks, matrixStack, );
                     TileEntityRenderer<TileEntity> tileEntityRenderer = TileEntityRendererDispatcher.instance.getRenderer(tileentity);
                     int i = WorldRenderer.getCombinedLight(world, tileentity.getPos());
                     if (tileEntityRenderer != null) {
                         matrixStack.push();
-//                        matrixStack.translate(pos.getX(), pos.getY(), pos.getZ());  // TODO: check this
+                        matrixStack.translate(pos.getX(), pos.getY(), pos.getZ());
                         float partialTicks = 0;
                         tileEntityRenderer.render(tileentity, partialTicks, matrixStack, impl, i, OverlayTexture.NO_OVERLAY);
                         matrixStack.pop();
@@ -366,6 +380,13 @@ public class Exporter {
 
         // finish all builders that were drawing, then add the data
         impl.finish();
+
+        // TODO: need to call impl.buffer callback here if drawing or not?
+//        if (impl.buffer.isDrawing())
+        if (impl.buffer.vertexCount > 0) {
+            throw new IllegalStateException();
+        }
+
         addAllFinishedData();
         mc.gameSettings.ambientOcclusionStatus = pre;
 
@@ -378,5 +399,9 @@ public class Exporter {
         }
 
         return true;
+    }
+
+    public BufferedImage getAtlasImage(ResourceLocation resource) {
+        return atlasCacheMap.computeIfAbsent(resource, Exporter::computeImage);
     }
 }

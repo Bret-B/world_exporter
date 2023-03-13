@@ -6,8 +6,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.client.renderer.Atlases;
 import net.minecraft.client.renderer.RenderType;
-import org.apache.commons.lang3.tuple.ImmutablePair;
+import net.minecraft.util.ResourceLocation;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.commons.lang3.tuple.Triple;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -31,7 +32,7 @@ public class ObjExporter extends Exporter {
         put(Atlases.getTranslucentBlockType(), Integer.MAX_VALUE);
     }};
     private final ArrayList<Quad> allQuads = new ArrayList<>();
-    private final Map<UVBounds, Float> uvTransparencyCache = new HashMap<>();
+    private final Map<Pair<ResourceLocation, UVBounds>, Float> uvTransparencyCache = new HashMap<>();
     private final Comparator<Quad> quadComparator = getQuadSort();
 
     public ObjExporter(ClientPlayerEntity player, int radius, int lower, int upper) {
@@ -49,7 +50,7 @@ public class ObjExporter extends Exporter {
         int verticesCount = 1;
         int textureUvCount = 1;
         int modelCount = 0;
-        Map<Pair<UVBounds, Integer>, Integer> modelToIdMap = new HashMap<>();
+        Map<Triple<ResourceLocation, UVBounds, Integer>, Integer> modelToIdMap = new HashMap<>();
         try (FileWriter objWriter = new FileWriter(objFile.getPath()); BufferedWriter objbw = new BufferedWriter(objWriter, 32 * (int) Math.pow(2, 20));
              FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlbw = new BufferedWriter(mtlWriter, (int) Math.pow(2, 10))) {
             objbw.write("mtllib " + mtlFilenameIn + "\n\n");
@@ -63,11 +64,11 @@ public class ObjExporter extends Exporter {
 
                 Map<Integer, ArrayList<Quad>> quadsForModel = new HashMap<>();
                 for (Quad quad : allQuads) {
-                    Pair<UVBounds, Integer> model = new ImmutablePair<>(quad.getUvBounds(), quad.getColor());
+                    Triple<ResourceLocation, UVBounds, Integer> model = Triple.of(quad.getResource(), quad.getUvBounds(), quad.getColor());
 
                     int modelId;
                     if (!modelToIdMap.containsKey(model)) {
-                        BufferedImage image = getImageFromUV(quad.getUvBounds(), quad.getColor());
+                        BufferedImage image = getImageFromUV(quad.getResource(), quad.getUvBounds(), quad.getColor());
                         if (image == null || ImgUtils.isCompletelyTransparent(image)) {
                             modelToIdMap.put(model, -1);
                             continue;
@@ -223,14 +224,17 @@ public class ObjExporter extends Exporter {
         }
     }
 
-    private BufferedImage getImageFromUV(UVBounds uvbound, int color) {
-        int width = Math.round(atlasImage.getWidth() * uvbound.uDist());
-        int height = Math.round(atlasImage.getHeight() * uvbound.vDist());
-        int startX = Math.round(atlasImage.getWidth() * uvbound.uMin);
-        int startY = Math.round(atlasImage.getHeight() * uvbound.vMin);
+    private BufferedImage getImageFromUV(ResourceLocation resource, UVBounds uvbound, int color) {
+        BufferedImage baseImage = getAtlasImage(resource);
+        uvbound = uvbound.clamped();
+
+        int width = Math.round(baseImage.getWidth() * uvbound.uDist());
+        int height = Math.round(baseImage.getHeight() * uvbound.vDist());
+        int startX = Math.round(baseImage.getWidth() * uvbound.uMin);
+        int startY = Math.round(baseImage.getHeight() * uvbound.vMin);
         BufferedImage textureImg = null;
         try {
-            textureImg = atlasImage.getSubimage(startX, startY, width, height);
+            textureImg = baseImage.getSubimage(startX, startY, width, height);
         } catch (RasterFormatException exception) {
             LOGGER.warn("Unable to get the texture for uvbounds: " + width + "w, " + height + "h, " + startX + "x, " + startY + "y, " + "with Uv bounds: " +
                     String.join(",", String.valueOf(uvbound.uMin), String.valueOf(uvbound.uMax), String.valueOf(uvbound.vMin), String.valueOf(uvbound.vMax)));
@@ -250,8 +254,8 @@ public class ObjExporter extends Exporter {
             RenderType quad1Layer = quad1.getType();
             RenderType quad2Layer = quad2.getType();
             if (quad1Layer == quad2Layer) {
-                float avg1 = uvTransparencyCache.computeIfAbsent(quad1.getUvBounds(), k -> ImgUtils.averageTransparencyValue(getImageFromUV(quad1.getUvBounds(), -1)));
-                float avg2 = uvTransparencyCache.computeIfAbsent(quad2.getUvBounds(), k -> ImgUtils.averageTransparencyValue(getImageFromUV(quad2.getUvBounds(), -1)));
+                float avg1 = uvTransparencyCache.computeIfAbsent(Pair.of(quad1.getResource(), quad1.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImageFromUV(quad1.getResource(), quad1.getUvBounds(), -1)));
+                float avg2 = uvTransparencyCache.computeIfAbsent(Pair.of(quad2.getResource(), quad2.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImageFromUV(quad2.getResource(), quad2.getUvBounds(), -1)));
                 return Float.compare(avg1, avg2);
             } else {
                 return Integer.compare(renderOrder.getOrDefault(quad1Layer, 3), renderOrder.getOrDefault(quad2Layer, 3));

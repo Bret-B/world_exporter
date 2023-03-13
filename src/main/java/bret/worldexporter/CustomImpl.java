@@ -5,6 +5,8 @@ import com.mojang.blaze3d.vertex.IVertexBuilder;
 import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
 import net.minecraft.client.renderer.*;
 import net.minecraft.client.renderer.model.ModelBakery;
+import net.minecraft.inventory.container.PlayerContainer;
+import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.Util;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -19,10 +21,11 @@ public class CustomImpl implements IRenderTypeBuffer {
     public final BufferBuilder buffer;
     public final Map<RenderType, BufferBuilder> fixedBuffers;
     protected final Set<BufferBuilder> startedBuffers = Sets.newHashSet();
+    private final Map<RenderType, ResourceLocation> renderResourceLocationMap;
     protected Optional<RenderType> lastRenderType = Optional.empty();
     private Runnable fallbackBufferCallback;
 
-    public CustomImpl() {
+    public CustomImpl(Map<RenderType, ResourceLocation> renderResourceLocationMapIn) {
         this.buffer = new BufferBuilder(2097152);
         RegionRenderCacheBuilder tempBuilder = new RegionRenderCacheBuilder();
         RegionRenderCacheBuilder tempBuilder2 = new RegionRenderCacheBuilder();  // FIXME: slightly hacky
@@ -51,6 +54,7 @@ public class CustomImpl implements IRenderTypeBuffer {
                 put(p_228485_1_, p_228488_1_);
             });
         });
+        this.renderResourceLocationMap = renderResourceLocationMapIn;
     }
 
     private static void put(Object2ObjectLinkedOpenHashMap<RenderType, BufferBuilder> mapBuildersIn, RenderType renderTypeIn) {
@@ -99,17 +103,28 @@ public class CustomImpl implements IRenderTypeBuffer {
             if (this.startedBuffers.remove(lvt_2_1_)) {
 //                p_228462_1_.finish(lvt_2_1_, 0, 0, 0);
                 if (lvt_2_1_.isDrawing()) {
-                    lvt_2_1_.finishDrawing();
-                    // If the buffer being finished is the fallback buffer, the data needs to be processed immediately before it is overwritten
+                    if (p_228462_1_ instanceof RenderType.Type) {
+                        RenderType.Type renderTypeExtended = (RenderType.Type) p_228462_1_;
+                        RenderType.State renderState = renderTypeExtended.renderState;
+                        renderState.texture.texture.ifPresent(resourceLocation -> {
+                            if (resourceLocation != PlayerContainer.LOCATION_BLOCKS_TEXTURE) {
+                                renderResourceLocationMap.put(p_228462_1_, resourceLocation);
+                            }
+                        });
+                    }
+
                     if (lvt_2_1_ == this.buffer) {
+                        // If the buffer being finished is the fallback buffer, the data needs to be processed immediately before it is overwritten/finished
+                        // The function should also call finishDrawing on the buffer before consuming the data
                         fallbackBufferCallback.run();
+                    } else {
+                        lvt_2_1_.finishDrawing();
                     }
                 }
 
                 if (lvt_3_1_) {
                     this.lastRenderType = Optional.empty();
                 }
-
             }
         }
     }
@@ -118,7 +133,7 @@ public class CustomImpl implements IRenderTypeBuffer {
         this.fallbackBufferCallback = fallbackBufferCallback;
     }
 
-    private BufferBuilder getBufferRaw(RenderType p_228463_1_) {
+    public BufferBuilder getBufferRaw(RenderType p_228463_1_) {
         return (BufferBuilder) this.fixedBuffers.getOrDefault(p_228463_1_, this.buffer);
     }
 }

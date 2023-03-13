@@ -4,6 +4,7 @@ import bret.worldexporter.legacylwjgl.Matrix3f;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.util.ResourceLocation;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -14,12 +15,13 @@ public class Quad {
     private static final Vector3f DESIRED_NORM = new Vector3f(0, 0, 1);
     private final Vertex[] vertices = new Vertex[4];
     private final RenderType type;
-
+    private ResourceLocation resource;
     private int count = 0;
     private UVBounds uvBounds;
 
-    public Quad(RenderType renderType) {
-        type = renderType;
+    public Quad(RenderType renderType, ResourceLocation resource) {
+        this.type = renderType;
+        this.resource = resource;
     }
 
     public Quad(Quad other) {
@@ -29,6 +31,7 @@ public class Quad {
         this.count = other.count;
         this.type = other.type;
         this.uvBounds = new UVBounds(other.uvBounds);
+        this.resource = other.resource;
     }
 
     public boolean overlaps(Quad second) {
@@ -110,6 +113,14 @@ public class Quad {
         validate();
 
         return vertices[0].getColor();
+    }
+
+    public ResourceLocation getResource() {
+        return resource;
+    }
+
+    public void setResource(ResourceLocation resource) {
+        this.resource = resource;
     }
 
     public RenderType getType() {
