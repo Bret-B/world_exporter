@@ -61,9 +61,12 @@ public class Exporter {
     private final World world;
     private int currentX;
     private int currentZ;
-    private BlockPos lastBlock;
-    private UUID lastEntityUUID;
-    private boolean lastIsBlock;
+    private BlockPos lastFixedBlock;
+    private UUID lastFixedEntityUUID;
+    private boolean lastFixedIsBlock;
+    private BlockPos lastFallbackBlock;
+    private UUID lastFallbackEntityUUID;
+    private boolean lastFallbackIsBlock;
 
     public Exporter(ClientPlayerEntity player, int radius, int lower, int upper) {
         atlasCacheMap.put(null, computeImage(PlayerContainer.LOCATION_BLOCKS_TEXTURE));
@@ -76,31 +79,7 @@ public class Exporter {
         world = player.getEntityWorld();
         currentX = startPos.getX();
         currentZ = startPos.getZ();
-
-        impl = new CustomImpl(renderResourceLocationMap);
-        impl.setFallbackBufferCallback(() -> {
-            int fallbackCount = impl.buffer.vertexCount - preCountVertices.getOrDefault(null, 0);
-            preCountVertices.remove(null);
-            impl.buffer.finishDrawing();
-            ArrayList<Quad> quadList = null;
-            if (lastIsBlock && lastBlock != null) {
-                quadList = blockQuadsMap.computeIfAbsent(lastBlock, k -> new ArrayList<>());
-            } else if (lastEntityUUID != null) {
-                quadList = entityUUIDQuadsMap.computeIfAbsent(lastEntityUUID, k -> new ArrayList<>());
-            }
-
-            if (quadList != null && fallbackCount > 0) {
-                com.mojang.datafixers.util.Pair<BufferBuilder.DrawState, ByteBuffer> stateBufferPair = impl.buffer.getNextBuffer();
-                BufferBuilder.DrawState drawState = stateBufferPair.getFirst();
-                ByteBuffer bytebuffer = stateBufferPair.getSecond();
-
-                if (drawState.getVertexCount() == 0 || drawState.getDrawMode() != GL11.GL_QUADS || !supportedVertexFormat(drawState.getFormat())) {
-                    return;
-                }
-
-                addVertices(bytebuffer, impl.buffer.getVertexFormat().getElements(), quadList, impl.lastRenderType.orElse(null), 0, drawState.getVertexCount());
-            }
-        });
+        impl = new CustomImpl(this);
     }
 
     public static BufferedImage computeImage(ResourceLocation resource) {
@@ -160,7 +139,7 @@ public class Exporter {
         bytebuffer.position(vertexStartIndex);
         for (int vertexNum = 0; vertexNum < vertexCount; ++vertexNum) {
             if (skipQuad) {
-                vertexNum += 4 - (vertexNum - 1) % 4;  // TODO: test this
+                vertexNum += 3 - (vertexNum - 1) % 4;
                 if (vertexNum >= vertexCount) break;
                 bytebuffer.position(bytebuffer.position() + (4 - ((vertexNum - 1) % 4)));
                 quad = new Quad(type, resource);
@@ -259,6 +238,9 @@ public class Exporter {
             buf.discard();
         }
 
+        if (impl.buffer.isDrawing()) impl.buffer.finishDrawing();
+        impl.buffer.discard();
+
         impl.finish();
 
         layerPosVerticesMap.clear();
@@ -272,7 +254,7 @@ public class Exporter {
         preCountVertices.clear();
 
         // fallback buffer count, key of null, since it has no type
-        preCountVertices.put(null, impl.buffer.vertexCount);  // null refers to the fallback bufferBuilder, which has no type
+        preCountVertices.put(null, impl.buffer.vertexCount);  // null refers to the fallback bufferBuilder, which has no single render type
 
         // loop over Impl renderTypes, get buffer, get vertex count from that, and store it
         for (RenderType type : impl.fixedBuffers.keySet()) {
@@ -290,22 +272,51 @@ public class Exporter {
             int difference = impl.getBufferRaw(type).vertexCount - prevCount;
             if (difference == 0) continue;
 
-            if (lastIsBlock) {
-                layerPosVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastBlock, Pair.of(prevCount, difference));
+            if (lastFixedIsBlock) {
+                layerPosVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastFixedBlock, Pair.of(prevCount, difference));
             } else {
-                layerUUIDVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastEntityUUID, Pair.of(prevCount, difference));
+                layerUUIDVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastFixedEntityUUID, Pair.of(prevCount, difference));
             }
         }
     }
 
     private void preEntity(UUID entityUUID) {
-        lastIsBlock = false;
-        lastEntityUUID = entityUUID;
+        lastFixedIsBlock = false;
+        lastFixedEntityUUID = entityUUID;
     }
 
     private void preBlock(BlockPos pos) {
-        lastIsBlock = true;
-        lastBlock = pos;
+        lastFixedIsBlock = true;
+        lastFixedBlock = pos;
+    }
+
+    protected void setLastFallbackInfo() {
+        lastFallbackIsBlock = lastFixedIsBlock;
+        lastFallbackBlock = lastFixedBlock;
+        lastFallbackEntityUUID = lastFixedEntityUUID;
+    }
+
+    protected void fallbackBufferCallback() {
+        impl.buffer.finishDrawing();
+        com.mojang.datafixers.util.Pair<BufferBuilder.DrawState, ByteBuffer> stateBufferPair = impl.buffer.getNextBuffer();
+        impl.buffer.discard();
+        BufferBuilder.DrawState drawState = stateBufferPair.getFirst();
+        ByteBuffer bytebuffer = stateBufferPair.getSecond();
+
+        if (drawState.getVertexCount() == 0 || drawState.getDrawMode() != GL11.GL_QUADS || !supportedVertexFormat(drawState.getFormat())) {
+            return;
+        }
+
+        ArrayList<Quad> quadList;
+        if (lastFallbackIsBlock && lastFallbackBlock != null) {
+            quadList = blockQuadsMap.computeIfAbsent(lastFallbackBlock, k -> new ArrayList<>());
+        } else if (lastFallbackEntityUUID != null) {
+            quadList = entityUUIDQuadsMap.computeIfAbsent(lastFallbackEntityUUID, k -> new ArrayList<>());
+        } else {
+            return;
+        }
+
+        addVertices(bytebuffer, impl.buffer.getVertexFormat().getElements(), quadList, impl.lastRenderType.orElse(null), 0, drawState.getVertexCount());
     }
 
     private boolean supportedVertexFormat(VertexFormat format) {
@@ -380,11 +391,8 @@ public class Exporter {
 
         // finish all builders that were drawing, then add the data
         impl.finish();
-
-        // TODO: need to call impl.buffer callback here if drawing or not?
-//        if (impl.buffer.isDrawing())
-        if (impl.buffer.vertexCount > 0) {
-            throw new IllegalStateException();
+        if (impl.buffer.isDrawing()) {
+            fallbackBufferCallback();
         }
 
         addAllFinishedData();

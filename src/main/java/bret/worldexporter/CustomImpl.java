@@ -6,7 +6,6 @@ import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
 import net.minecraft.client.renderer.*;
 import net.minecraft.client.renderer.model.ModelBakery;
 import net.minecraft.inventory.container.PlayerContainer;
-import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.Util;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -21,11 +20,10 @@ public class CustomImpl implements IRenderTypeBuffer {
     public final BufferBuilder buffer;
     public final Map<RenderType, BufferBuilder> fixedBuffers;
     protected final Set<BufferBuilder> startedBuffers = Sets.newHashSet();
-    private final Map<RenderType, ResourceLocation> renderResourceLocationMap;
+    private final Exporter exporter;
     protected Optional<RenderType> lastRenderType = Optional.empty();
-    private Runnable fallbackBufferCallback;
 
-    public CustomImpl(Map<RenderType, ResourceLocation> renderResourceLocationMapIn) {
+    public CustomImpl(Exporter exporter) {
         this.buffer = new BufferBuilder(2097152);
         RegionRenderCacheBuilder tempBuilder = new RegionRenderCacheBuilder();
         RegionRenderCacheBuilder tempBuilder2 = new RegionRenderCacheBuilder();  // FIXME: slightly hacky
@@ -54,7 +52,7 @@ public class CustomImpl implements IRenderTypeBuffer {
                 put(p_228485_1_, p_228488_1_);
             });
         });
-        this.renderResourceLocationMap = renderResourceLocationMapIn;
+        this.exporter = exporter;
     }
 
     private static void put(Object2ObjectLinkedOpenHashMap<RenderType, BufferBuilder> mapBuildersIn, RenderType renderTypeIn) {
@@ -74,6 +72,9 @@ public class CustomImpl implements IRenderTypeBuffer {
 
             if (this.startedBuffers.add(lvt_3_1_)) {
                 lvt_3_1_.begin(p_getBuffer_1_.getDrawMode(), p_getBuffer_1_.getVertexFormat());
+                if (lvt_3_1_ == this.buffer) {
+                    exporter.setLastFallbackInfo();
+                }
             }
 
             this.lastRenderType = lvt_2_1_;
@@ -108,7 +109,7 @@ public class CustomImpl implements IRenderTypeBuffer {
                         RenderType.State renderState = renderTypeExtended.renderState;
                         renderState.texture.texture.ifPresent(resourceLocation -> {
                             if (resourceLocation != PlayerContainer.LOCATION_BLOCKS_TEXTURE) {
-                                renderResourceLocationMap.put(p_228462_1_, resourceLocation);
+                                exporter.renderResourceLocationMap.put(p_228462_1_, resourceLocation);
                             }
                         });
                     }
@@ -116,7 +117,7 @@ public class CustomImpl implements IRenderTypeBuffer {
                     if (lvt_2_1_ == this.buffer) {
                         // If the buffer being finished is the fallback buffer, the data needs to be processed immediately before it is overwritten/finished
                         // The function should also call finishDrawing on the buffer before consuming the data
-                        fallbackBufferCallback.run();
+                        exporter.fallbackBufferCallback();
                     } else {
                         lvt_2_1_.finishDrawing();
                     }
@@ -127,10 +128,6 @@ public class CustomImpl implements IRenderTypeBuffer {
                 }
             }
         }
-    }
-
-    public void setFallbackBufferCallback(Runnable fallbackBufferCallback) {
-        this.fallbackBufferCallback = fallbackBufferCallback;
     }
 
     public BufferBuilder getBufferRaw(RenderType p_228463_1_) {
