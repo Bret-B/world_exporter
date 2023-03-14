@@ -19,6 +19,8 @@ import net.minecraft.world.ILightReader;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
+import java.util.BitSet;
+
 @OnlyIn(Dist.CLIENT)
 public class CustomFluidBlockRenderer {
     private static boolean isAdjacentFluidSameAs(IBlockReader worldIn, BlockPos pos, Direction side, IFluidState state) {
@@ -39,7 +41,7 @@ public class CustomFluidBlockRenderer {
         }
     }
 
-    public boolean render(ILightReader lightReaderIn, BlockPos posIn, IVertexBuilder vertexBuilderIn, IFluidState fluidStateIn, int xOff, int zOff) {
+    public boolean render(ILightReader lightReaderIn, BlockPos posIn, IVertexBuilder vertexBuilderIn, IFluidState fluidStateIn, int xOff, int zOff, BitSet forceRender) {
         boolean flag = fluidStateIn.isTagged(FluidTags.LAVA);
         TextureAtlasSprite[] atextureatlassprite = net.minecraftforge.client.ForgeHooksClient.getFluidSprites(lightReaderIn, posIn, fluidStateIn);
         int i = fluidStateIn.getFluid().getAttributes().getColor(lightReaderIn, posIn);
@@ -53,7 +55,7 @@ public class CustomFluidBlockRenderer {
         boolean flag4 = !isAdjacentFluidSameAs(lightReaderIn, posIn, Direction.SOUTH, fluidStateIn);
         boolean flag5 = !isAdjacentFluidSameAs(lightReaderIn, posIn, Direction.WEST, fluidStateIn);
         boolean flag6 = !isAdjacentFluidSameAs(lightReaderIn, posIn, Direction.EAST, fluidStateIn);
-        if (!flag1 && !flag2 && !flag6 && !flag5 && !flag3 && !flag4) {
+        if (!flag1 && !flag2 && !flag6 && !flag5 && !flag3 && !flag4 && forceRender.cardinality() == 0) {
             return false;
         } else {
             boolean flag7 = false;
@@ -73,7 +75,7 @@ public class CustomFluidBlockRenderer {
             double d2 = (double) posIn.getZ() - zOff;
             float f11 = 0.001F;
             float f12 = flag2 ? 0.001F : 0.0F;
-            if (flag1 && !isNeighbourSideCovered(lightReaderIn, posIn, Direction.UP, Math.min(Math.min(f7, f8), Math.min(f9, f10)))) {
+            if (Exporter.isForced(forceRender, Direction.UP) || (flag1 && !isNeighbourSideCovered(lightReaderIn, posIn, Direction.UP, Math.min(Math.min(f7, f8), Math.min(f9, f10))))) {
                 flag7 = true;
                 f7 -= 0.001F;
                 f8 -= 0.001F;
@@ -144,7 +146,7 @@ public class CustomFluidBlockRenderer {
 //                }
             }
 
-            if (flag2) {
+            if (Exporter.isForced(forceRender, Direction.DOWN) || flag2) {
                 float f34 = atextureatlassprite[0].getMinU();
                 float f35 = atextureatlassprite[0].getMaxU();
                 float f37 = atextureatlassprite[0].getMinV();
@@ -210,7 +212,7 @@ public class CustomFluidBlockRenderer {
                     flag8 = flag6;
                 }
 
-                if (flag8 && !isNeighbourSideCovered(lightReaderIn, posIn, direction, Math.max(f36, f38))) {
+                if (Exporter.isForced(forceRender, direction) || (flag8 && !isNeighbourSideCovered(lightReaderIn, posIn, direction, Math.max(f36, f38)))) {
                     flag7 = true;
                     BlockPos blockpos = posIn.offset(direction);
                     TextureAtlasSprite textureatlassprite2 = atextureatlassprite[1];

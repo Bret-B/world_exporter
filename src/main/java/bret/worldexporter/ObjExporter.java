@@ -228,8 +228,7 @@ public class ObjExporter extends Exporter {
         BufferedImage baseImage;
         try {
             baseImage = getAtlasImage(resource);
-        }
-        catch (NullPointerException exception) {
+        } catch (NullPointerException exception) {
             return null;
         }
 

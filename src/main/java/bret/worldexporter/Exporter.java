@@ -23,6 +23,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.fluid.IFluidState;
 import net.minecraft.inventory.container.PlayerContainer;
 import net.minecraft.tileentity.TileEntity;
+import net.minecraft.util.Direction;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
 import net.minecraftforge.client.model.ModelDataManager;
@@ -58,8 +59,8 @@ public class Exporter {
     private final int upperHeightLimit;
     private final int playerX;
     private final int playerZ;
-    private final BlockPos startPos;
-    private final BlockPos endPos;
+    private final BlockPos startPos;  // higher values
+    private final BlockPos endPos;  // lower values
     private final int exportRadius;
     private int currentX;
     private int currentZ;
@@ -100,6 +101,11 @@ public class Exporter {
         buffer.get(data);
         atlasImage.setRGB(0, 0, atlasWidth, atlasHeight, data, 0, atlasWidth);
         return atlasImage;
+    }
+
+    // return true if the bit in a bitset for a given direction is set
+    public static boolean isForced(BitSet bitSet, Direction direction) {
+        return bitSet.get(direction.getIndex());
     }
 
     protected void addAllFinishedData() {
@@ -325,6 +331,24 @@ public class Exporter {
         return format == DefaultVertexFormats.BLOCK || format == DefaultVertexFormats.ENTITY;
     }
 
+    // Returns the facing directions that should be forcibly enabled (at the edge of the export) for a given BlockPos
+    public BitSet getForcedDirections(BlockPos pos) {
+        BitSet bitSet = new BitSet();
+        if (pos.getX() >= startPos.getX())
+            bitSet.set(Direction.getFacingFromAxisDirection(Direction.Axis.X, Direction.AxisDirection.POSITIVE).getIndex());
+        if (pos.getX() <= endPos.getX())
+            bitSet.set(Direction.getFacingFromAxisDirection(Direction.Axis.X, Direction.AxisDirection.NEGATIVE).getIndex());
+        if (pos.getY() >= startPos.getY())
+            bitSet.set(Direction.getFacingFromAxisDirection(Direction.Axis.Y, Direction.AxisDirection.POSITIVE).getIndex());
+        if (pos.getY() <= endPos.getY())
+            bitSet.set(Direction.getFacingFromAxisDirection(Direction.Axis.Y, Direction.AxisDirection.NEGATIVE).getIndex());
+        if (pos.getZ() >= startPos.getZ())
+            bitSet.set(Direction.getFacingFromAxisDirection(Direction.Axis.Z, Direction.AxisDirection.POSITIVE).getIndex());
+        if (pos.getZ() <= endPos.getZ())
+            bitSet.set(Direction.getFacingFromAxisDirection(Direction.Axis.Z, Direction.AxisDirection.NEGATIVE).getIndex());
+        return bitSet;
+    }
+
     public boolean getNextChunkData() {
         if (currentX < endPos.getX() || currentZ < endPos.getZ()) {
             return false;
@@ -373,18 +397,19 @@ public class Exporter {
             IModelData modelData = ModelDataManager.getModelData(world, pos);
             for (RenderType rendertype : RenderType.getBlockRenderTypes()) {
                 if (!ifluidstate.isEmpty() && RenderTypeLookup.canRenderInLayer(ifluidstate, rendertype)) {
+                    BitSet forceRender = getForcedDirections(pos);
                     BufferBuilder bufferbuilder = impl.getBuffer(rendertype);  // automatically starts buffer
-                    blockRendererDispatcher.renderFluid(pos, world, bufferbuilder, ifluidstate, playerX, playerZ);
+                    blockRendererDispatcher.renderFluid(pos, world, bufferbuilder, ifluidstate, playerX, playerZ, forceRender);
                 }
 
                 if (state.getRenderType() != BlockRenderType.INVISIBLE && RenderTypeLookup.canRenderInLayer(state, rendertype)) {
+                    BitSet forceRender = getForcedDirections(pos);
                     BufferBuilder bufferbuilder2 = impl.getBuffer(rendertype);   // automatically starts buffer
                     matrixStack.push();
                     matrixStack.translate(pos.getX(), pos.getY(), pos.getZ());
-                    blockRendererDispatcher.renderModel(state, pos, world, matrixStack, bufferbuilder2, true, random, modelData);
+                    blockRendererDispatcher.renderModel(state, pos, world, matrixStack, bufferbuilder2, forceRender, random, modelData);
                     matrixStack.pop();
                 }
-
             }
 
             postCountLayerVertices();

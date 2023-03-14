@@ -31,13 +31,13 @@ public class CustomBlockModelRenderer {
         this.blockColors = blockColorsIn;
     }
 
-    public boolean renderModel(ILightReader worldIn, IBakedModel modelIn, BlockState stateIn, BlockPos posIn, MatrixStack matrixIn, IVertexBuilder buffer, boolean checkSides, Random randomIn, long rand, int combinedOverlayIn, net.minecraftforge.client.model.data.IModelData modelData) {
+    public boolean renderModel(ILightReader worldIn, IBakedModel modelIn, BlockState stateIn, BlockPos posIn, MatrixStack matrixIn, IVertexBuilder buffer, BitSet forceRender, Random randomIn, long rand, int combinedOverlayIn, net.minecraftforge.client.model.data.IModelData modelData) {
         Vec3d vec3d = stateIn.getOffset(worldIn, posIn);
         matrixIn.translate(vec3d.x, vec3d.y, vec3d.z);
         modelData = modelIn.getModelData(worldIn, posIn, stateIn, modelData);
 
         try {
-            return this.renderModelFlat(worldIn, modelIn, stateIn, posIn, matrixIn, buffer, checkSides, randomIn, rand, combinedOverlayIn, modelData);
+            return this.renderModelFlat(worldIn, modelIn, stateIn, posIn, matrixIn, buffer, forceRender, randomIn, rand, combinedOverlayIn, modelData);
         } catch (Throwable throwable) {
             CrashReport crashreport = CrashReport.makeCrashReport(throwable, "Tesselating block model");
             CrashReportCategory crashreportcategory = crashreport.makeCategory("Block model being tesselated");
@@ -47,14 +47,14 @@ public class CustomBlockModelRenderer {
         }
     }
 
-    public boolean renderModelFlat(ILightReader worldIn, IBakedModel modelIn, BlockState stateIn, BlockPos posIn, MatrixStack matrixStackIn, IVertexBuilder buffer, boolean checkSides, Random randomIn, long rand, int combinedOverlayIn, net.minecraftforge.client.model.data.IModelData modelData) {
+    public boolean renderModelFlat(ILightReader worldIn, IBakedModel modelIn, BlockState stateIn, BlockPos posIn, MatrixStack matrixStackIn, IVertexBuilder buffer, BitSet forceRender, Random randomIn, long rand, int combinedOverlayIn, net.minecraftforge.client.model.data.IModelData modelData) {
         boolean flag = false;
         BitSet bitset = new BitSet(3);
 
         for (Direction direction : Direction.values()) {
             randomIn.setSeed(rand);
             List<BakedQuad> list = modelIn.getQuads(stateIn, direction, randomIn, modelData);
-            if (!list.isEmpty() && (!checkSides || Block.shouldSideBeRendered(stateIn, worldIn, posIn, direction))) {
+            if (!list.isEmpty() && (Exporter.isForced(forceRender, direction) || Block.shouldSideBeRendered(stateIn, worldIn, posIn, direction))) {
                 int i = WorldRenderer.getPackedLightmapCoords(worldIn, stateIn, posIn.offset(direction));
                 this.renderQuadsFlat(worldIn, stateIn, posIn, i, combinedOverlayIn, false, matrixStackIn, buffer, list, bitset);
                 flag = true;

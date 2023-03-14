@@ -17,6 +17,7 @@ import net.minecraft.world.ILightReader;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
+import java.util.BitSet;
 import java.util.Random;
 
 @OnlyIn(Dist.CLIENT)
@@ -31,10 +32,10 @@ public class CustomBlockRendererDispatcher {
         this.fluidRenderer = new CustomFluidBlockRenderer();
     }
 
-    public boolean renderModel(BlockState blockStateIn, BlockPos posIn, ILightReader lightReaderIn, MatrixStack matrixStackIn, IVertexBuilder vertexBuilderIn, boolean checkSides, Random rand, net.minecraftforge.client.model.data.IModelData modelData) {
+    public boolean renderModel(BlockState blockStateIn, BlockPos posIn, ILightReader lightReaderIn, MatrixStack matrixStackIn, IVertexBuilder vertexBuilderIn, BitSet forceRender, Random rand, net.minecraftforge.client.model.data.IModelData modelData) {
         try {
             BlockRenderType blockrendertype = blockStateIn.getRenderType();
-            return blockrendertype == BlockRenderType.MODEL && this.blockModelRenderer.renderModel(lightReaderIn, this.getModelForState(blockStateIn), blockStateIn, posIn, matrixStackIn, vertexBuilderIn, checkSides, rand, blockStateIn.getPositionRandom(posIn), OverlayTexture.NO_OVERLAY, modelData);
+            return blockrendertype == BlockRenderType.MODEL && this.blockModelRenderer.renderModel(lightReaderIn, this.getModelForState(blockStateIn), blockStateIn, posIn, matrixStackIn, vertexBuilderIn, forceRender, rand, blockStateIn.getPositionRandom(posIn), OverlayTexture.NO_OVERLAY, modelData);
         } catch (Throwable throwable) {
             CrashReport crashreport = CrashReport.makeCrashReport(throwable, "Tesselating block in world");
             CrashReportCategory crashreportcategory = crashreport.makeCategory("Block being tesselated");
@@ -43,9 +44,9 @@ public class CustomBlockRendererDispatcher {
         }
     }
 
-    public boolean renderFluid(BlockPos posIn, ILightReader lightReaderIn, IVertexBuilder vertexBuilderIn, IFluidState fluidStateIn, int xOff, int zOff) {
+    public boolean renderFluid(BlockPos posIn, ILightReader lightReaderIn, IVertexBuilder vertexBuilderIn, IFluidState fluidStateIn, int xOff, int zOff, BitSet forceRender) {
         try {
-            return this.fluidRenderer.render(lightReaderIn, posIn, vertexBuilderIn, fluidStateIn, xOff, zOff);
+            return this.fluidRenderer.render(lightReaderIn, posIn, vertexBuilderIn, fluidStateIn, xOff, zOff, forceRender);
         } catch (Throwable throwable) {
             CrashReport crashreport = CrashReport.makeCrashReport(throwable, "Tesselating liquid in world");
             CrashReportCategory crashreportcategory = crashreport.makeCategory("Block being tesselated");
