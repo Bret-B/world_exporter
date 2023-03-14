@@ -18,12 +18,13 @@ import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.client.renderer.vertex.VertexFormat;
 import net.minecraft.client.renderer.vertex.VertexFormatElement;
 import net.minecraft.client.settings.AmbientOcclusionStatus;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.entity.Entity;
 import net.minecraft.fluid.IFluidState;
 import net.minecraft.inventory.container.PlayerContainer;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
 import net.minecraftforge.client.model.ModelDataManager;
 import net.minecraftforge.client.model.data.IModelData;
 import org.apache.commons.lang3.tuple.Pair;
@@ -52,13 +53,14 @@ public class Exporter {
     protected final Map<RenderType, Integer> preCountVertices = new HashMap<>();
     protected final Map<RenderType, ResourceLocation> renderResourceLocationMap = new HashMap<>();
     protected final CustomImpl impl;
+    private final ClientWorld world = Objects.requireNonNull(mc.world);
     private final int lowerHeightLimit;
     private final int upperHeightLimit;
     private final int playerX;
     private final int playerZ;
     private final BlockPos startPos;
     private final BlockPos endPos;
-    private final World world;
+    private final int exportRadius;
     private int currentX;
     private int currentZ;
     private BlockPos lastFixedBlock;
@@ -74,9 +76,9 @@ public class Exporter {
         upperHeightLimit = upper;
         playerX = (int) player.getPosX();
         playerZ = (int) player.getPosZ();
+        exportRadius = radius;
         startPos = new BlockPos(playerX + radius, upperHeightLimit, playerZ + radius);
         endPos = new BlockPos(playerX - radius, lowerHeightLimit, playerZ - radius);
-        world = player.getEntityWorld();
         currentX = startPos.getX();
         currentZ = startPos.getZ();
         impl = new CustomImpl(this);
@@ -329,8 +331,10 @@ public class Exporter {
         }
 
         resetBuilders();
-        AmbientOcclusionStatus pre = mc.gameSettings.ambientOcclusionStatus;
+        AmbientOcclusionStatus preAO = mc.gameSettings.ambientOcclusionStatus;
+        boolean preShadows = mc.gameSettings.entityShadows;
         mc.gameSettings.ambientOcclusionStatus = AmbientOcclusionStatus.OFF;
+        mc.gameSettings.entityShadows = false;
 
         // ((a % b) + b) % b gives true modulus instead of just remainder
         int chunkXOffset = ((currentX % 16) + 16) % 16;
@@ -386,8 +390,28 @@ public class Exporter {
             postCountLayerVertices();
         }
 
-        // TODO: loop over world.getAllEntities() here
+        // export all entities within chunk
+        for (Entity entity : world.getAllEntities()) {
+            double x = entity.getPosX();
+            double y = entity.getPosY();
+            double z = entity.getPosZ();
+            double maxHorizontalDistance = Math.max(Math.abs(playerX - x), Math.abs(playerZ - z));
+            if (maxHorizontalDistance > exportRadius || y < lowerHeightLimit || y > upperHeightLimit
+                    || x < thisChunkEnd.getX() || x > thisChunkStart.getX()
+                    || z < thisChunkEnd.getZ() || z > thisChunkStart.getZ()) {
+                continue;
+            }
 
+            preEntity(entity.getUniqueID());
+            preCountLayerVertices();
+            matrixStack.push();
+            float partialTicks = 0;
+            int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright
+            mc.getRenderManager().renderEntityStatic(entity, entity.getPosX(), entity.getPosY(), entity.getPosZ(), entity.rotationYaw,
+                    partialTicks, matrixStack, impl, packedLight);
+            matrixStack.pop();
+            postCountLayerVertices();
+        }
 
         // finish all builders that were drawing, then add the data
         impl.finish();
@@ -396,7 +420,8 @@ public class Exporter {
         }
 
         addAllFinishedData();
-        mc.gameSettings.ambientOcclusionStatus = pre;
+        mc.gameSettings.ambientOcclusionStatus = preAO;
+        mc.gameSettings.entityShadows = preShadows;
 
         // Update the current position to be the starting position of the next chunk export (which may be
         // outside the selected boundary, accounted for at the beginning of the function call).
