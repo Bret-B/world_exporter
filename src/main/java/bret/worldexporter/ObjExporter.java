@@ -228,8 +228,10 @@ public class ObjExporter extends Exporter {
         BufferedImage baseImage = getAtlasImage(resource);
         uvbound = uvbound.clamped();
 
-        int width = Math.round(baseImage.getWidth() * uvbound.uDist());
-        int height = Math.round(baseImage.getHeight() * uvbound.vDist());
+        if (uvbound.uDist() <= 0.000001f || uvbound.vDist() <= 0.000001f) return null;
+
+        int width = Math.max(1, Math.round(baseImage.getWidth() * uvbound.uDist()));
+        int height = Math.max(1, Math.round(baseImage.getHeight() * uvbound.vDist()));
         int startX = Math.round(baseImage.getWidth() * uvbound.uMin);
         int startY = Math.round(baseImage.getHeight() * uvbound.vMin);
         BufferedImage textureImg = null;
