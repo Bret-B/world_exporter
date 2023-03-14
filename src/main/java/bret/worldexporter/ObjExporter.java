@@ -225,7 +225,14 @@ public class ObjExporter extends Exporter {
     }
 
     private BufferedImage getImageFromUV(ResourceLocation resource, UVBounds uvbound, int color) {
-        BufferedImage baseImage = getAtlasImage(resource);
+        BufferedImage baseImage;
+        try {
+            baseImage = getAtlasImage(resource);
+        }
+        catch (NullPointerException exception) {
+            return null;
+        }
+
         uvbound = uvbound.clamped();
 
         if (uvbound.uDist() <= 0.000001f || uvbound.vDist() <= 0.000001f) return null;
