@@ -14,12 +14,12 @@ apply plugin: 'maven-publish'
 
 def mcversion = '1.15.2'
 
-version = '0.1.0'
+version = '1.0.0'
 group = 'bret.worldexporter' // http://maven.apache.org/guides/mini/guide-naming-conventions.html
 archivesBaseName = "worldexporter-${mcversion}"
 
 sourceCompatibility = targetCompatibility = compileJava.sourceCompatibility = compileJava.targetCompatibility = '1.8' // Need this here so eclipse task generates correctly.
-//Print out JVM information so that we know what version is running. Extreamly useful for people to know when helping you.
+//Print out JVM information so that we know what version is running. Extremely useful for people to know when helping you.
 println('Java: ' + System.getProperty('java.version') + ' JVM: ' + System.getProperty('java.vm.version') + '(' + System.getProperty('java.vendor') + ') Arch: ' + System.getProperty('os.arch'))
 
 minecraft {

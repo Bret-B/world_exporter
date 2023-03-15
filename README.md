@@ -11,23 +11,23 @@ When in game, run: `/worldexport {radius} {lower} {upper}` where each argument i
 
 `radius`: the radius of the export extending from your current position, in blocks
 
-`lower`: optional lower height limit
+`lower`: optional lower height limit (y level)
 
-`upper`: optional upper height limit
+`upper`: optional upper height limit (y level)
 
 Example usage:
 
 `/worldexport 128 50 255`
 
-Note: Due to clientside command limitations with 1.14.4, 
+Note: Due to clientside command limitations with 1.15.2, 
 the /worldexport command will not show up as a registered command, but will work fine.
 
 A few key features:
 * Resource/texture packs are supported
-* Modded blocks are supported to the extent that they are not tile entity renderers.
+* Modded blocks are supported including tile entity renderers
+* Entities like beds, chests, item frames, mobs, players, dropped items, etc. are supported
 
 Current limitations:
-* Entities like beds, chests, item frames, etc. are not currently supported
 * The export radius is limited by your render distance
 
 # Renders of an Exported World
