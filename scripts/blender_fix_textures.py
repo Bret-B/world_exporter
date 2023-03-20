@@ -3,7 +3,7 @@
 
 import bpy
 
-backface_culling = True  # optional
+backface_culling = False  # optional
 cycles = True
 
 for mat in bpy.data.materials:
