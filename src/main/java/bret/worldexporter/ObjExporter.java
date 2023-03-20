@@ -21,15 +21,19 @@ import java.nio.file.Files;
 import java.util.*;
 
 public class ObjExporter extends Exporter {
+    private static final int OTHER_ORDER = 3;
     private static final Map<RenderType, Integer> renderOrder = new HashMap<RenderType, Integer>() {{
-        put(RenderType.getSolid(), 0);
-        put(Atlases.getSolidBlockType(), 0);
-        put(RenderType.getCutout(), 1);
-        put(Atlases.getCutoutBlockType(), 1);
-        put(RenderType.getCutoutMipped(), 2);
-        put(Atlases.getCutoutBlockType(), 2);
-        put(RenderType.getTranslucent(), Integer.MAX_VALUE);
-        put(Atlases.getTranslucentBlockType(), Integer.MAX_VALUE);
+        put(RenderType.solid(), 0);
+        put(Atlases.solidBlockSheet(), 0);
+        put(RenderType.cutout(), 1);
+        put(Atlases.cutoutBlockSheet(), 1);
+        put(RenderType.cutoutMipped(), 2);
+        put(RenderType.tripwire(), Integer.MAX_VALUE - 1);
+        put(RenderType.translucent(), Integer.MAX_VALUE);
+        put(RenderType.translucentMovingBlock(), Integer.MAX_VALUE);
+        put(RenderType.translucentNoCrumbling(), Integer.MAX_VALUE);
+        put(Atlases.translucentItemSheet(), Integer.MAX_VALUE);
+        put(Atlases.translucentCullBlockSheet(), Integer.MAX_VALUE);
     }};
     private final ArrayList<Quad> allQuads = new ArrayList<>();
     private final Map<Pair<ResourceLocation, UVBounds>, Float> uvTransparencyCache = new HashMap<>();
@@ -40,7 +44,7 @@ public class ObjExporter extends Exporter {
     }
 
     public void export(String objFilenameIn, String mtlFilenameIn) throws IOException {
-        File baseDir = new File(Minecraft.getInstance().gameDir, "worldexporter/worlddump" + java.time.LocalDateTime.now().toString().replace(':', '-'));
+        File baseDir = new File(Minecraft.getInstance().gameDirectory, "worldexporter/worlddump" + java.time.LocalDateTime.now().toString().replace(':', '-'));
         String textureDirName = "t";
         File texturePath = new File(baseDir, textureDirName);
         Files.createDirectories(texturePath.toPath());
@@ -266,7 +270,7 @@ public class ObjExporter extends Exporter {
                 float avg2 = uvTransparencyCache.computeIfAbsent(Pair.of(quad2.getResource(), quad2.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImageFromUV(quad2.getResource(), quad2.getUvBounds(), -1)));
                 return Float.compare(avg1, avg2);
             } else {
-                return Integer.compare(renderOrder.getOrDefault(quad1Layer, 3), renderOrder.getOrDefault(quad2Layer, 3));
+                return Integer.compare(renderOrder.getOrDefault(quad1Layer, OTHER_ORDER), renderOrder.getOrDefault(quad2Layer, OTHER_ORDER));
             }
         };
     }

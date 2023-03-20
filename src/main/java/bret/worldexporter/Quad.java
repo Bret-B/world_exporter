@@ -10,7 +10,6 @@ import java.util.Arrays;
 import java.util.Objects;
 
 public class Quad {
-
     private static final float TOLERANCE = 0.0001f;
     private static final Vector3f DESIRED_NORM = new Vector3f(0, 0, 1);
     private final Vertex[] vertices = new Vertex[4];
