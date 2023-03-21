@@ -62,7 +62,6 @@ public class Exporter {
     private final int playerZ;
     private final BlockPos startPos;  // higher values
     private final BlockPos endPos;  // lower values
-    private final int exportRadius;
     private int currentX;
     private int currentZ;
     private BlockPos lastFixedBlock;
@@ -78,7 +77,6 @@ public class Exporter {
         upperHeightLimit = upper;
         playerX = (int) player.getX();
         playerZ = (int) player.getZ();
-        exportRadius = radius;
         startPos = new BlockPos(playerX + radius, upperHeightLimit, playerZ + radius);
         endPos = new BlockPos(playerX - radius, lowerHeightLimit, playerZ - radius);
         currentX = startPos.getX();

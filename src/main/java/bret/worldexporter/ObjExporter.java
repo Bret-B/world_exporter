@@ -38,6 +38,13 @@ public class ObjExporter extends Exporter {
     private final ArrayList<Quad> allQuads = new ArrayList<>();
     private final Map<Pair<ResourceLocation, UVBounds>, Float> uvTransparencyCache = new HashMap<>();
     private final Comparator<Quad> quadComparator = getQuadSort();
+    // geometric vertices cache (tag v) for the .obj output which maps the vertex to its number in the file
+    private final Map<Vector3f, Integer> verticesCache = new LRUCache<>(20000);
+    // uv texture coordinates cache (tag vt) for the .obj output which maps the uv value to its number in the file
+    private final Map<Vector2f, Integer> uvCache = new LRUCache<>(5000);
+    private final int[] vertUVIndices = new int[8];
+    private int vertCount = 0;
+    private int uvCount = 0;
 
     public ObjExporter(ClientPlayerEntity player, int radius, int lower, int upper) {
         super(player, radius, lower, upper);
@@ -51,8 +58,6 @@ public class ObjExporter extends Exporter {
         File objFile = new File(baseDir, objFilenameIn);
         File mtlFile = new File(baseDir, mtlFilenameIn);
 
-        int verticesCount = 1;
-        int textureUvCount = 1;
         int modelCount = 0;
         Map<Triple<ResourceLocation, UVBounds, Integer>, Integer> modelToIdMap = new HashMap<>();
         try (FileWriter objWriter = new FileWriter(objFile.getPath()); BufferedWriter objbw = new BufferedWriter(objWriter, 32 * (int) Math.pow(2, 20));
@@ -108,9 +113,7 @@ public class ObjExporter extends Exporter {
                 for (int modelId : quadsForModel.keySet()) {
                     objbw.write("usemtl " + modelId + '\n');
                     for (Quad quad : quadsForModel.get(modelId)) {
-                        objbw.write(quadToObj(quad, verticesCount, textureUvCount));
-                        verticesCount += 4;
-                        textureUvCount += 4;
+                        objbw.write(quadToObj(quad));
                     }
                 }
 
@@ -190,26 +193,43 @@ public class ObjExporter extends Exporter {
     }
 
     // returns a String of relevant .obj file lines that represent the quad
-    private String quadToObj(Quad quad, int vertCount, int uvCount) {
-        StringBuilder result = new StringBuilder();
+    private String quadToObj(Quad quad) {
+        StringBuilder result = new StringBuilder(128);
+        // loop through the quad vertices, calculating the .obj file index for position and uv coordinates
         for (int i = 0; i < 4; ++i) {
             Vertex vertex = quad.getVertices()[i];
             Vector3f position = vertex.getPosition();
+            int vertIndex;
+            if (verticesCache.containsKey(position)) {
+                vertIndex = verticesCache.get(position);
+            } else {
+                vertIndex = ++vertCount;
+                verticesCache.put(position, vertIndex);
+                result.append("v ").append(position.x).append(' ').append(position.y).append(' ').append(position.z).append('\n');
+            }
+            vertUVIndices[i] = vertIndex;
 
-            // scale global texture atlas UV coordinates to single texture image based UV coordinates (and flip the V)
             Vector2f uv = vertex.getUv();
-            UVBounds uvBounds = quad.getUvBounds();
-            float u = (uv.x - uvBounds.uMin) / uvBounds.uDist();
-            float v = 1 - ((uv.y - uvBounds.vMin) / uvBounds.vDist());
-
-            result.append("v ").append(position.x).append(' ').append(position.y).append(' ').append(position.z).append('\n');
-            result.append("vt ").append(u).append(' ').append(v).append('\n');
+            int uvIndex;
+            if (uvCache.containsKey(uv)) {
+                uvIndex = uvCache.get(uv);
+            } else {
+                uvIndex = ++uvCount;
+                uvCache.put(uv, uvIndex);
+                // scale global texture atlas UV coordinates to single texture image based UV coordinates (and flip the V)
+                UVBounds uvBounds = quad.getUvBounds();
+                float u = (uv.x - uvBounds.uMin) / uvBounds.uDist();
+                float v = 1 - ((uv.y - uvBounds.vMin) / uvBounds.vDist());
+                result.append("vt ").append(u).append(' ').append(v).append('\n');
+            }
+            vertUVIndices[i + 4] = uvIndex;
         }
 
-        result.append("f ").append(vertCount).append('/').append(uvCount).append(' ');
-        result.append(vertCount + 1).append('/').append(uvCount + 1).append(' ');
-        result.append(vertCount + 2).append('/').append(uvCount + 2).append(' ');
-        result.append(vertCount + 3).append('/').append(uvCount + 3).append("\n\n");
+        // use the indices to write the quad's face information with the format: f v1/vt1 v2/vt2 v3/vt3 v4/vt4
+        result.append("f ").append(vertUVIndices[0]).append('/').append(vertUVIndices[4]).append(' ');
+        result.append(vertUVIndices[1]).append('/').append(vertUVIndices[5]).append(' ');
+        result.append(vertUVIndices[2]).append('/').append(vertUVIndices[6]).append(' ');
+        result.append(vertUVIndices[3]).append('/').append(vertUVIndices[7]).append("\n\n");
 
         return result.toString();
     }

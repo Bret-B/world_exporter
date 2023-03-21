@@ -32,6 +32,7 @@
 package bret.worldexporter.legacylwjgl;
 
 import java.nio.FloatBuffer;
+import java.util.Objects;
 
 /**
  * Holds a 3-tuple vector.
@@ -351,6 +352,7 @@ public class Vector3f extends Vector {
         this.z = z;
     }
 
+    @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (obj == null) return false;
@@ -360,5 +362,10 @@ public class Vector3f extends Vector {
         if (x == other.x && y == other.y && z == other.z) return true;
 
         return false;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(x, y, z);
     }
 }

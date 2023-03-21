@@ -32,6 +32,7 @@
 package bret.worldexporter.legacylwjgl;
 
 import java.nio.FloatBuffer;
+import java.util.Objects;
 
 
 /**
@@ -296,6 +297,7 @@ public class Vector2f extends Vector {
         this.y = y;
     }
 
+    @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (obj == null) return false;
@@ -307,4 +309,8 @@ public class Vector2f extends Vector {
         return false;
     }
 
+    @Override
+    public int hashCode() {
+        return Objects.hash(x, y);
+    }
 }
