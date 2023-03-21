@@ -188,7 +188,8 @@ public class CustomBlockModelRenderer {
                 pBrightness = WorldRenderer.getLightColor(pBlockAccess, pState, blockpos);
             }
 
-            float f = pBlockAccess.getShade(bakedquad.getDirection(), bakedquad.isShade());
+            // float f = pBlockAccess.getShade(bakedquad.getDirection(), bakedquad.isShade());
+            float f = 1.0F; // force diffuse lighting off
             this.putQuadData(pBlockAccess, pState, pPos, pBuffer, pMatrixStack.last(), bakedquad, f, f, f, f, pBrightness, pBrightness, pBrightness, pBrightness, pCombinedOverlay);
         }
     }
