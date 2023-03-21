@@ -196,6 +196,7 @@ public class ObjExporter extends Exporter {
     private String quadToObj(Quad quad) {
         StringBuilder result = new StringBuilder(128);
         // loop through the quad vertices, calculating the .obj file index for position and uv coordinates
+        UVBounds uvBounds = quad.getUvBounds();
         for (int i = 0; i < 4; ++i) {
             Vertex vertex = quad.getVertices()[i];
             Vector3f position = vertex.getPosition();
@@ -210,17 +211,16 @@ public class ObjExporter extends Exporter {
             vertUVIndices[i] = vertIndex;
 
             Vector2f uv = vertex.getUv();
+            // relative UV coordinates [0-1] are calculated using the respective u/v distances, and the v is flipped
+            Vector2f relativeUV = new Vector2f((uv.x - uvBounds.uMin) / uvBounds.uDist(), 1 - ((uv.y - uvBounds.vMin) / uvBounds.vDist()));
             int uvIndex;
-            if (uvCache.containsKey(uv)) {
-                uvIndex = uvCache.get(uv);
+            if (uvCache.containsKey(relativeUV)) {
+                uvIndex = uvCache.get(relativeUV);
             } else {
                 uvIndex = ++uvCount;
-                uvCache.put(uv, uvIndex);
+                uvCache.put(relativeUV, uvIndex);
                 // scale global texture atlas UV coordinates to single texture image based UV coordinates (and flip the V)
-                UVBounds uvBounds = quad.getUvBounds();
-                float u = (uv.x - uvBounds.uMin) / uvBounds.uDist();
-                float v = 1 - ((uv.y - uvBounds.vMin) / uvBounds.vDist());
-                result.append("vt ").append(u).append(' ').append(v).append('\n');
+                result.append("vt ").append(relativeUV.x).append(' ').append(relativeUV.y).append('\n');
             }
             vertUVIndices[i + 4] = uvIndex;
         }
