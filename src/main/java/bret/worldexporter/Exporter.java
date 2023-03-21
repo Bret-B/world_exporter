@@ -315,7 +315,7 @@ public class Exporter {
     }
 
     private boolean supportedVertexFormat(VertexFormat format) {
-        return format == DefaultVertexFormats.BLOCK || format == DefaultVertexFormats.NEW_ENTITY;
+        return format.getElements().contains(DefaultVertexFormats.ELEMENT_POSITION) && format.getElements().contains(DefaultVertexFormats.ELEMENT_UV0);
     }
 
     // Returns the facing directions that should be forcibly enabled (at the edge of the export) for a given BlockPos
