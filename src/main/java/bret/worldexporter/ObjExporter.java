@@ -6,9 +6,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.client.renderer.Atlases;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.util.ResourceLocation;
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.commons.lang3.tuple.Triple;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -59,7 +59,8 @@ public class ObjExporter extends Exporter {
         File mtlFile = new File(baseDir, mtlFilenameIn);
 
         int modelCount = 0;
-        Map<Triple<ResourceLocation, UVBounds, Integer>, Integer> modelToIdMap = new HashMap<>();
+        Map<Pair<ResourceLocation, Integer>, Integer> modelToIdMap = new HashMap<>();
+        Map<Integer, ResourceLocation> modelIdToLocation = new HashMap<>();
         try (FileWriter objWriter = new FileWriter(objFile.getPath()); BufferedWriter objbw = new BufferedWriter(objWriter, 32 * (int) Math.pow(2, 20));
              FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlbw = new BufferedWriter(mtlWriter, (int) Math.pow(2, 10))) {
             objbw.write("mtllib " + mtlFilenameIn + "\n\n");
@@ -73,31 +74,34 @@ public class ObjExporter extends Exporter {
 
                 Map<Integer, ArrayList<Quad>> quadsForModel = new HashMap<>();
                 for (Quad quad : allQuads) {
-                    Triple<ResourceLocation, UVBounds, Integer> model = Triple.of(quad.getResource(), quad.getUvBounds(), quad.getColor());
+                    Pair<ResourceLocation, Integer> model = Pair.of(quad.getResource(), quad.getColor());
 
                     int modelId;
                     if (!modelToIdMap.containsKey(model)) {
-                        BufferedImage image = getImageFromUV(quad.getResource(), quad.getUvBounds(), quad.getColor());
+                        BufferedImage image = getImage(quad);
                         if (image == null || ImgUtils.isCompletelyTransparent(image)) {
+                            LOGGER.warn("Skipped face with texture: " + quad.getResource());
                             modelToIdMap.put(model, -1);
                             continue;
                         }
 
                         modelId = modelCount++;
                         modelToIdMap.put(model, modelId);
+                        modelIdToLocation.put(modelId, quad.getResource());
+                        String modelName = quad.getResource().toString().replaceAll("[^a-zA-Z0-9.-]", "-") + '_' + modelId;
 
-                        File fullTextureFilename = new File(texturePath, modelId + ".png");
+                        File fullTextureFilename = new File(texturePath, modelName + ".png");
                         writeTexture(fullTextureFilename, image);
 
                         // write material information to .mtl file
-                        mtlbw.write("newmtl " + modelId + "\n");
+                        mtlbw.write("newmtl " + modelName + "\n");
                         try {
                             if (ImgUtils.imageHasTransparency(image)) {
-                                mtlbw.write("map_d " + textureDirName + '/' + modelId + ".png" + '\n');
+                                mtlbw.write("map_d " + textureDirName + '/' + modelName + ".png" + '\n');
                             }
                         } catch (InterruptedException ignored) {
                         }
-                        mtlbw.write("map_Kd " + textureDirName + '/' + modelId + ".png" + "\n\n");
+                        mtlbw.write("map_Kd " + textureDirName + '/' + modelName + ".png" + "\n\n");
                     } else {
                         modelId = modelToIdMap.get(model);
                     }
@@ -111,7 +115,7 @@ public class ObjExporter extends Exporter {
 
                 // write all related quads for each material/model id to .obj file
                 for (int modelId : quadsForModel.keySet()) {
-                    objbw.write("usemtl " + modelId + '\n');
+                    objbw.write("usemtl " + modelIdToLocation.get(modelId).toString().replaceAll("[^a-zA-Z0-9.-]", "-") + '_' + modelId + '\n');
                     for (Quad quad : quadsForModel.get(modelId)) {
                         objbw.write(quadToObj(quad));
                     }
@@ -196,7 +200,6 @@ public class ObjExporter extends Exporter {
     private String quadToObj(Quad quad) {
         StringBuilder result = new StringBuilder(128);
         // loop through the quad vertices, calculating the .obj file index for position and uv coordinates
-        UVBounds uvBounds = quad.getUvBounds();
         for (int i = 0; i < 4; ++i) {
             Vertex vertex = quad.getVertices()[i];
             Vector3f position = vertex.getPosition();
@@ -211,16 +214,14 @@ public class ObjExporter extends Exporter {
             vertUVIndices[i] = vertIndex;
 
             Vector2f uv = vertex.getUv();
-            // relative UV coordinates [0-1] are calculated using the respective u/v distances, and the v is flipped
-            Vector2f relativeUV = new Vector2f((uv.x - uvBounds.uMin) / uvBounds.uDist(), 1 - ((uv.y - uvBounds.vMin) / uvBounds.vDist()));
             int uvIndex;
-            if (uvCache.containsKey(relativeUV)) {
-                uvIndex = uvCache.get(relativeUV);
+            if (uvCache.containsKey(uv)) {
+                uvIndex = uvCache.get(uv);
             } else {
                 uvIndex = ++uvCount;
-                uvCache.put(relativeUV, uvIndex);
-                // scale global texture atlas UV coordinates to single texture image based UV coordinates (and flip the V)
-                result.append("vt ").append(relativeUV.x).append(' ').append(relativeUV.y).append('\n');
+                uvCache.put(uv, uvIndex);
+                // the v coordinate is flipped
+                result.append("vt ").append(uv.x).append(' ').append(1 - uv.y).append('\n');
             }
             vertUVIndices[i + 4] = uvIndex;
         }
@@ -230,7 +231,6 @@ public class ObjExporter extends Exporter {
         result.append(vertUVIndices[1]).append('/').append(vertUVIndices[5]).append(' ');
         result.append(vertUVIndices[2]).append('/').append(vertUVIndices[6]).append(' ');
         result.append(vertUVIndices[3]).append('/').append(vertUVIndices[7]).append("\n\n");
-
         return result.toString();
     }
 
@@ -248,13 +248,27 @@ public class ObjExporter extends Exporter {
         }
     }
 
-    private BufferedImage getImageFromUV(ResourceLocation resource, UVBounds uvbound, int color) {
-        BufferedImage baseImage;
-        try {
-            baseImage = getAtlasImage(resource);
-        } catch (NullPointerException exception) {
-            return null;
+    private BufferedImage getImage(Quad quad) {
+        BufferedImage image;
+        TextureAtlasSprite texture = quad.getTexture();
+        if (texture == null) {
+            image = Exporter.computeImage(quad.getResource());
+            image = ImgUtils.tintImage(image, quad.getColor());
+        } else {
+            image = getAtlasSubImage(texture, quad.getColor());
         }
+        return image;
+    }
+
+    public BufferedImage getAtlasSubImage(TextureAtlasSprite texture, int color) {
+        UVBounds originalUV = new UVBounds(texture.getU0(), texture.getU1(), texture.getV0(), texture.getV1());
+        return getImageFromUV(texture.atlas().location(), originalUV, color);
+    }
+
+    // Returns a subimage of a resourceLocation's texture image determined by uvbounds and tints with provided color
+    private BufferedImage getImageFromUV(ResourceLocation resource, UVBounds uvbound, int color) {
+        BufferedImage baseImage = getAtlasImage(resource);
+        if (baseImage == null) return null;
 
         uvbound = uvbound.clamped();
 
@@ -286,8 +300,8 @@ public class ObjExporter extends Exporter {
             RenderType quad1Layer = quad1.getType();
             RenderType quad2Layer = quad2.getType();
             if (quad1Layer == quad2Layer) {
-                float avg1 = uvTransparencyCache.computeIfAbsent(Pair.of(quad1.getResource(), quad1.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImageFromUV(quad1.getResource(), quad1.getUvBounds(), -1)));
-                float avg2 = uvTransparencyCache.computeIfAbsent(Pair.of(quad2.getResource(), quad2.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImageFromUV(quad2.getResource(), quad2.getUvBounds(), -1)));
+                float avg1 = uvTransparencyCache.computeIfAbsent(Pair.of(quad1.getResource(), quad1.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad1)));
+                float avg2 = uvTransparencyCache.computeIfAbsent(Pair.of(quad2.getResource(), quad2.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad2)));
                 return Float.compare(avg1, avg2);
             } else {
                 return Integer.compare(renderOrder.getOrDefault(quad1Layer, OTHER_ORDER), renderOrder.getOrDefault(quad2Layer, OTHER_ORDER));

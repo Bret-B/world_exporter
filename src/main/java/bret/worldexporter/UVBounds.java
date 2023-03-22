@@ -11,6 +11,13 @@ public class UVBounds {
     public UVBounds() {
     }
 
+    public UVBounds(float uMin, float uMax, float vMin, float vMax) {
+        this.uMin = uMin;
+        this.uMax = uMax;
+        this.vMin = vMin;
+        this.vMax = vMax;
+    }
+
     public UVBounds(UVBounds other) {
         this.uMin = other.uMin;
         this.uMax = other.uMax;

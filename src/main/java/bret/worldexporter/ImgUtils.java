@@ -7,6 +7,8 @@ import java.awt.image.RescaleOp;
 
 public class ImgUtils {
     public static BufferedImage tintImage(BufferedImage image, int color) {
+        if (color == -1 || image == null) return image;
+
         // https://forge.gemwire.uk/wiki/Tinted_Textures
         float[] offsets = new float[]{0, 0, 0, 0};
         float[] rgbaFactors = new float[4];

@@ -11,7 +11,10 @@ import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.RenderTypeLookup;
 import net.minecraft.client.renderer.WorldRenderer;
+import net.minecraft.client.renderer.texture.AtlasTexture;
 import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.client.renderer.texture.Texture;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.renderer.tileentity.TileEntityRenderer;
 import net.minecraft.client.renderer.tileentity.TileEntityRendererDispatcher;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
@@ -40,6 +43,7 @@ import java.awt.image.BufferedImage;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
@@ -55,6 +59,7 @@ public class Exporter {
     protected final Map<RenderType, Integer> preCountVertices = new HashMap<>();
     protected final Map<RenderType, ResourceLocation> renderResourceLocationMap = new HashMap<>();
     protected final CustomImpl impl;
+    private final Map<Pair<ResourceLocation, UVBounds>, Pair<ResourceLocation, TextureAtlasSprite>> atlasUVToSpriteCache = new HashMap<>();
     private final ClientWorld world = Objects.requireNonNull(mc.level);
     private final int lowerHeightLimit;
     private final int upperHeightLimit;
@@ -72,7 +77,6 @@ public class Exporter {
     private boolean lastFallbackIsBlock;
 
     public Exporter(ClientPlayerEntity player, int radius, int lower, int upper) {
-        atlasCacheMap.put(null, computeImage(PlayerContainer.BLOCK_ATLAS));
         lowerHeightLimit = lower;
         upperHeightLimit = upper;
         playerX = (int) player.getX();
@@ -84,9 +88,12 @@ public class Exporter {
         impl = new CustomImpl(this);
     }
 
+    // only ResourceLocations with an associated Texture should be used
     public static BufferedImage computeImage(ResourceLocation resource) {
-        int textureId = Objects.requireNonNull(Minecraft.getInstance().getTextureManager().getTexture(resource)).getId();
-//        int textureId = Objects.requireNonNull(Minecraft.getInstance().getModelManager().getAtlasTexture(resource)).getGlTextureId();
+        Texture texture = Minecraft.getInstance().getTextureManager().getTexture(resource);
+        if (texture == null) return null;
+
+        int textureId = texture.getId();
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, textureId);
         GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
         GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
@@ -140,7 +147,7 @@ public class Exporter {
     }
 
     protected void addVertices(ByteBuffer bytebuffer, List<VertexFormatElement> list, ArrayList<Quad> quadsList, RenderType type, int vertexStartIndex, int vertexCount) {
-        ResourceLocation resource = renderResourceLocationMap.getOrDefault(type, null);
+        ResourceLocation resource = renderResourceLocationMap.getOrDefault(type, PlayerContainer.BLOCK_ATLAS);
         Quad quad = new Quad(type, resource);
         boolean skipQuad = false;
         bytebuffer.position(vertexStartIndex);
@@ -424,6 +431,7 @@ public class Exporter {
         }
 
         addAllFinishedData();
+        updateQuadTextures();
         mc.options.ambientOcclusion = preAO;
         mc.options.entityShadows = preShadows;
 
@@ -440,5 +448,55 @@ public class Exporter {
 
     public BufferedImage getAtlasImage(ResourceLocation resource) {
         return atlasCacheMap.computeIfAbsent(resource, Exporter::computeImage);
+    }
+
+    // returns null if the provided ResourceLocation does not refer to an AtlasTexture
+    // could check if this is equivalent to MissingTextureSprite if this is ever a problem
+    private Pair<ResourceLocation, TextureAtlasSprite> getTextureFromAtlas(ResourceLocation resource, UVBounds uvBounds) {
+        Texture texture = Minecraft.getInstance().textureManager.getTexture(resource);
+        if (!(texture instanceof AtlasTexture)) return null;
+        AtlasTexture atlasTexture = (AtlasTexture) texture;
+
+        // Currently this is a memoized linear check over all an atlasTexture's TextureAtlasSprites to find
+        // which TextureAtlasSprite contains the given UVBounds
+        // If this is ever too slow a structure like a quadtree or spatial hashing could be used
+        return atlasUVToSpriteCache.computeIfAbsent(Pair.of(resource, uvBounds), k -> {
+            for (ResourceLocation name : atlasTexture.texturesByName.keySet()) {
+                TextureAtlasSprite sprite = atlasTexture.getSprite(name);
+                float uMin = sprite.getU0();
+                float uMax = sprite.getU1();
+                float vMin = sprite.getV0();
+                float vMax = sprite.getV1();
+                if (uvBounds.uMin >= uMin && uvBounds.uMax <= uMax && uvBounds.vMin >= vMin && uvBounds.vMax <= vMax) {
+                    return Pair.of(name, sprite);
+                }
+            }
+            return null;
+        });
+    }
+
+    // For every quad: if its texture refers to an atlasImage, update its texture resourceLocation, add a reference to its sprite,
+    // and update its UV coordinates respectively (in place)
+    private void updateQuadTextures() {
+        List<Quad> quads = blockQuadsMap.values().stream().flatMap(Collection::stream).collect(Collectors.toList());
+        quads.addAll(entityUUIDQuadsMap.values().stream().flatMap(Collection::stream).collect(Collectors.toList()));
+        for (Quad quad : quads) {
+            Pair<ResourceLocation, TextureAtlasSprite> nameAndTexture = getTextureFromAtlas(quad.getResource(), quad.getUvBounds());
+            if (nameAndTexture == null) {
+                continue;
+            }
+
+            quad.setResource(nameAndTexture.getLeft());
+            TextureAtlasSprite texture = nameAndTexture.getRight();
+            for (Vertex vertex : quad.getVertices()) {
+                Vector2f uv = vertex.getUv();
+                // these values could potentially be conditionally rounded if the precision loss would not be >= 1 pixel
+                // such rounding might help in the future when optimizing the exported mesh
+                uv.x = (uv.x - texture.getU0()) / (texture.getU1() - texture.getU0());
+                uv.y = (uv.y - texture.getV0()) / (texture.getV1() - texture.getV0());
+            }
+            quad.updateUvBounds();
+            quad.setTexture(texture);
+        }
     }
 }

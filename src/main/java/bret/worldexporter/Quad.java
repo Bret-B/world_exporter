@@ -4,6 +4,7 @@ import bret.worldexporter.legacylwjgl.Matrix3f;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.util.ResourceLocation;
 
 import java.util.Arrays;
@@ -17,6 +18,7 @@ public class Quad {
     private ResourceLocation resource;
     private int count = 0;
     private UVBounds uvBounds;
+    private TextureAtlasSprite texture;
 
     public Quad(RenderType renderType, ResourceLocation resource) {
         this.type = renderType;
@@ -31,6 +33,7 @@ public class Quad {
         this.type = other.type;
         this.uvBounds = new UVBounds(other.uvBounds);
         this.resource = other.resource;
+        this.texture = other.texture;
     }
 
     public boolean overlaps(Quad second) {
@@ -89,7 +92,7 @@ public class Quad {
         vertices[count++] = vertex;
 
         if (count == 4) {
-            setUvBounds();
+            updateUvBounds();
         }
     }
 
@@ -120,6 +123,14 @@ public class Quad {
 
     public void setResource(ResourceLocation resource) {
         this.resource = resource;
+    }
+
+    public TextureAtlasSprite getTexture() {
+        return texture;
+    }
+
+    public void setTexture(TextureAtlasSprite texture) {
+        this.texture = texture;
     }
 
     public RenderType getType() {
@@ -186,13 +197,9 @@ public class Quad {
         return result;
     }
 
-    private void validate() {
-        if (count < 4) {
-            throw new IllegalStateException();
-        }
-    }
+    public void updateUvBounds() {
+        validate();
 
-    private void setUvBounds() {
         uvBounds = new UVBounds();
         Vector2f uv = vertices[0].getUv();
         uvBounds.uMin = uv.x;
@@ -205,6 +212,12 @@ public class Quad {
             if (uv.x > uvBounds.uMax) uvBounds.uMax = uv.x;
             if (uv.y < uvBounds.vMin) uvBounds.vMin = uv.y;
             if (uv.y > uvBounds.vMax) uvBounds.vMax = uv.y;
+        }
+    }
+
+    private void validate() {
+        if (count < 4) {
+            throw new IllegalStateException();
         }
     }
 }

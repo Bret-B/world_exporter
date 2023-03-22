@@ -5,7 +5,6 @@ import com.mojang.blaze3d.vertex.IVertexBuilder;
 import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
 import net.minecraft.client.renderer.*;
 import net.minecraft.client.renderer.model.ModelBakery;
-import net.minecraft.inventory.container.PlayerContainer;
 import net.minecraft.util.Util;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -117,11 +116,8 @@ public class CustomImpl implements IRenderTypeBuffer {
                     if (pRenderType instanceof RenderType.Type) {
                         RenderType.Type renderTypeExtended = (RenderType.Type) pRenderType;
                         RenderType.State renderState = renderTypeExtended.state;
-                        renderState.textureState.texture.ifPresent(resourceLocation -> {
-                            if (resourceLocation != PlayerContainer.BLOCK_ATLAS) {
-                                exporter.renderResourceLocationMap.put(pRenderType, resourceLocation);
-                            }
-                        });
+                        renderState.textureState.texture.ifPresent(resourceLocation ->
+                                exporter.renderResourceLocationMap.put(pRenderType, resourceLocation));
                     }
 
                     if (bufferbuilder == this.builder) {
