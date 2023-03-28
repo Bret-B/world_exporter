@@ -26,7 +26,6 @@ Example usage with default values:
 
 `/worldexport 64 0 255 true false`
 
-<br />
 Note: Due to clientside command limitations with 1.16.5, the /worldexport command will not show up as a registered command. Regardless, it functions properly.
 
 Note: Due to limitations with the Wavefront .obj format, a new texture must be created for each different texture color. Consider turning **Biome Blend**, found 
