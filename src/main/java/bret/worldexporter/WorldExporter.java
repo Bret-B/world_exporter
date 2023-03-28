@@ -56,7 +56,7 @@ public class WorldExporter {
         } catch (Exception ignored) {
             Minecraft.getInstance().player.sendMessage(
                     new StringTextComponent("There was an error parsing the command arguments. " +
-                            "Example usage: " + cmdName + " 64 0 255 true"),
+                            "Example usage: " + cmdName + " 64 0 255 true false"),
                     Util.NIL_UUID
             );
             return;

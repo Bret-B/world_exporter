@@ -411,8 +411,6 @@ public class Exporter {
                     matrixStack.translate(pos.getX(), pos.getY(), pos.getZ());
                     BitSet forceRender = getForcedDirections(pos);
                     BufferBuilder bufferbuilder = impl.getBuffer(rendertype);   // automatically starts buffer
-                    // TODO: setting a fixed seed is not enough, texture randomness is seemingly baked into block positions/states
-                    //  could potentially modify the block state before rendering to remove this. This would greatly decrease mesh size
                     blockRendererDispatcher.renderModel(state, pos, world, matrixStack, bufferbuilder, forceRender, random, modelData, randomize);
 
                     // use renderBlock? potentially support for more blocks, like animated type blocks?
