@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# mods.toml description requires LF only for proper in-game rendering
+src/main/resources/META-INF/mods.toml eol=lf

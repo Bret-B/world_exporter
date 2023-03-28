@@ -92,7 +92,7 @@ public class Quad {
         vertices[count++] = vertex;
 
         if (count == 4) {
-            updateUvBounds();
+            addUvBounds();
         }
     }
 
@@ -161,6 +161,8 @@ public class Quad {
         Quad quad = (Quad) o;
         if (count != quad.count) return false;
         if (type != quad.type) return false;
+        if (resource != quad.resource) return false;
+        if (texture != quad.texture) return false;
         for (int i = 0; i < count; ++i) {
             boolean hasEquivalence = false;
             boolean hasUvEquivalence = false;
@@ -187,12 +189,13 @@ public class Quad {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         Quad quad = (Quad) o;
-        return count == quad.count && type == quad.type && Arrays.equals(vertices, quad.vertices);
+        return count == quad.count && type.equals(quad.type) && Arrays.equals(vertices, quad.vertices)
+                && resource.equals(quad.resource) && texture.equals(quad.texture);
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(count, type);
+        int result = Objects.hash(count, type, resource, texture);
         result = 31 * result + Arrays.hashCode(vertices);
         return result;
     }
@@ -200,7 +203,6 @@ public class Quad {
     public void updateUvBounds() {
         validate();
 
-        uvBounds = new UVBounds();
         Vector2f uv = vertices[0].getUv();
         uvBounds.uMin = uv.x;
         uvBounds.uMax = uv.x;
@@ -213,6 +215,11 @@ public class Quad {
             if (uv.y < uvBounds.vMin) uvBounds.vMin = uv.y;
             if (uv.y > uvBounds.vMax) uvBounds.vMax = uv.y;
         }
+    }
+
+    private void addUvBounds() {
+        uvBounds = new UVBounds();
+        updateUvBounds();
     }
 
     private void validate() {

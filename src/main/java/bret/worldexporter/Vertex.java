@@ -29,6 +29,12 @@ public class Vertex {
         this.position = position;
     }
 
+    public void setPosition(float x, float y, float z) {
+        position.x = x;
+        position.y = y;
+        position.z = z;
+    }
+
     public Vector2f getUv() {
         return uv;
     }

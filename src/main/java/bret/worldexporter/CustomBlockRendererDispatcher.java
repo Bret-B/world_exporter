@@ -39,14 +39,15 @@ public class CustomBlockRendererDispatcher {
     }
 
     @Deprecated //Forge: Model parameter
-    public boolean renderBatched(BlockState pBlockState, BlockPos pPos, IBlockDisplayReader pLightReader, MatrixStack pMatrixStack, IVertexBuilder pVertexBuilder, BitSet forceRender, Random pRand) {
-        return renderModel(pBlockState, pPos, pLightReader, pMatrixStack, pVertexBuilder, forceRender, pRand, net.minecraftforge.client.model.data.EmptyModelData.INSTANCE);
+    public boolean renderBatched(BlockState pBlockState, BlockPos pPos, IBlockDisplayReader pLightReader, MatrixStack pMatrixStack, IVertexBuilder pVertexBuilder, BitSet forceRender, Random pRand, boolean randomize) {
+        return renderModel(pBlockState, pPos, pLightReader, pMatrixStack, pVertexBuilder, forceRender, pRand, net.minecraftforge.client.model.data.EmptyModelData.INSTANCE, randomize);
     }
 
-    public boolean renderModel(BlockState blockStateIn, BlockPos posIn, IBlockDisplayReader lightReaderIn, MatrixStack matrixStackIn, IVertexBuilder vertexBuilderIn, BitSet forceRender, Random rand, net.minecraftforge.client.model.data.IModelData modelData) {
+    public boolean renderModel(BlockState blockStateIn, BlockPos posIn, IBlockDisplayReader lightReaderIn, MatrixStack matrixStackIn, IVertexBuilder vertexBuilderIn, BitSet forceRender, Random rand, net.minecraftforge.client.model.data.IModelData modelData, boolean randomize) {
         try {
+            long randSeed = randomize ? blockStateIn.getSeed(posIn) : 0;
             BlockRenderType blockrendertype = blockStateIn.getRenderShape();
-            return blockrendertype != BlockRenderType.MODEL ? false : this.modelRenderer.renderModel(lightReaderIn, this.getBlockModel(blockStateIn), blockStateIn, posIn, matrixStackIn, vertexBuilderIn, forceRender, rand, blockStateIn.getSeed(posIn), OverlayTexture.NO_OVERLAY, modelData);
+            return blockrendertype != BlockRenderType.MODEL ? false : this.modelRenderer.renderModel(lightReaderIn, this.getBlockModel(blockStateIn), blockStateIn, posIn, matrixStackIn, vertexBuilderIn, forceRender, rand, randSeed, OverlayTexture.NO_OVERLAY, modelData);
         } catch (Throwable throwable) {
             CrashReport crashreport = CrashReport.forThrowable(throwable, "Tesselating block in world");
             CrashReportCategory crashreportcategory = crashreport.addCategory("Block being tesselated");

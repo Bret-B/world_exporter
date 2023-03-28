@@ -35,7 +35,6 @@ public class ObjExporter extends Exporter {
         put(Atlases.translucentItemSheet(), Integer.MAX_VALUE);
         put(Atlases.translucentCullBlockSheet(), Integer.MAX_VALUE);
     }};
-    private final ArrayList<Quad> allQuads = new ArrayList<>();
     private final Map<Pair<ResourceLocation, UVBounds>, Float> uvTransparencyCache = new HashMap<>();
     private final Comparator<Quad> quadComparator = getQuadSort();
     // geometric vertices cache (tag v) for the .obj output which maps the vertex to its number in the file
@@ -43,11 +42,14 @@ public class ObjExporter extends Exporter {
     // uv texture coordinates cache (tag vt) for the .obj output which maps the uv value to its number in the file
     private final Map<Vector2f, Integer> uvCache = new LRUCache<>(5000);
     private final int[] vertUVIndices = new int[8];
+    private final boolean optimizeMesh;
+    private ArrayList<Quad> allQuads = new ArrayList<>();
     private int vertCount = 0;
     private int uvCount = 0;
 
-    public ObjExporter(ClientPlayerEntity player, int radius, int lower, int upper) {
-        super(player, radius, lower, upper);
+    public ObjExporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize) {
+        super(player, radius, lower, upper, randomize);
+        this.optimizeMesh = optimizeMesh;
     }
 
     public void export(String objFilenameIn, String mtlFilenameIn) throws IOException {
@@ -61,8 +63,8 @@ public class ObjExporter extends Exporter {
         int modelCount = 0;
         Map<Pair<ResourceLocation, Integer>, Integer> modelToIdMap = new HashMap<>();
         Map<Integer, ResourceLocation> modelIdToLocation = new HashMap<>();
-        try (FileWriter objWriter = new FileWriter(objFile.getPath()); BufferedWriter objbw = new BufferedWriter(objWriter, 32 * (int) Math.pow(2, 20));
-             FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlbw = new BufferedWriter(mtlWriter, (int) Math.pow(2, 10))) {
+        try (FileWriter objWriter = new FileWriter(objFile.getPath()); BufferedWriter objbw = new BufferedWriter(objWriter, 32 * (1 << 20));  // 32 MB buffer
+             FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlbw = new BufferedWriter(mtlWriter, 1 << 10)) {  // 1 KB buffer
             objbw.write("mtllib " + mtlFilenameIn + "\n\n");
 
             while (getNextChunkData()) {
@@ -71,6 +73,11 @@ public class ObjExporter extends Exporter {
                 fixOverlaps(entityUUIDQuadsMap.values());
                 blockQuadsMap.values().forEach(allQuads::addAll);
                 entityUUIDQuadsMap.values().forEach(allQuads::addAll);
+
+                if (optimizeMesh) {
+                    MeshOptimizer meshOptimizer = new MeshOptimizer();
+                    allQuads = meshOptimizer.optimize(allQuads);
+                }
 
                 Map<Integer, ArrayList<Quad>> quadsForModel = new HashMap<>();
                 for (Quad quad : allQuads) {
@@ -220,8 +227,7 @@ public class ObjExporter extends Exporter {
             } else {
                 uvIndex = ++uvCount;
                 uvCache.put(uv, uvIndex);
-                // the v coordinate is flipped
-                result.append("vt ").append(uv.x).append(' ').append(1 - uv.y).append('\n');
+                result.append("vt ").append(uv.x).append(' ').append(uv.y).append('\n');
             }
             vertUVIndices[i + 4] = uvIndex;
         }

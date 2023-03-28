@@ -368,4 +368,13 @@ public class Vector3f extends Vector {
     public int hashCode() {
         return Objects.hash(x, y, z);
     }
+
+    // custom code
+    public float distanceSq(Vector3f other) {
+        return (float) (Math.pow(x - other.x, 2) + Math.pow(y - other.y, 2) + Math.pow(z - other.z, 2));
+    }
+
+    public float distance(Vector3f other) {
+        return (float) Math.sqrt(distanceSq(other));
+    }
 }

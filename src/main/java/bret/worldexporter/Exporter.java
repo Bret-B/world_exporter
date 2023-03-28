@@ -59,12 +59,13 @@ public class Exporter {
     protected final Map<RenderType, Integer> preCountVertices = new HashMap<>();
     protected final Map<RenderType, ResourceLocation> renderResourceLocationMap = new HashMap<>();
     protected final CustomImpl impl;
-    private final Map<Pair<ResourceLocation, UVBounds>, Pair<ResourceLocation, TextureAtlasSprite>> atlasUVToSpriteCache = new HashMap<>();
+    private final Map<Pair<String, UVBounds>, Pair<ResourceLocation, TextureAtlasSprite>> atlasUVToSpriteCache = new HashMap<>();
     private final ClientWorld world = Objects.requireNonNull(mc.level);
     private final int lowerHeightLimit;
     private final int upperHeightLimit;
     private final int playerX;
     private final int playerZ;
+    private final boolean randomize;
     private final BlockPos startPos;  // higher values
     private final BlockPos endPos;  // lower values
     private int currentX;
@@ -76,7 +77,8 @@ public class Exporter {
     private UUID lastFallbackEntityUUID;
     private boolean lastFallbackIsBlock;
 
-    public Exporter(ClientPlayerEntity player, int radius, int lower, int upper) {
+    public Exporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean randomize) {
+        this.randomize = randomize;
         lowerHeightLimit = lower;
         upperHeightLimit = upper;
         playerX = (int) player.getX();
@@ -112,6 +114,15 @@ public class Exporter {
     // return true if the bit in a bitset for a given direction is set
     public static boolean isForced(BitSet bitSet, Direction direction) {
         return bitSet.get(direction.get3DDataValue());
+    }
+
+    // Flips quad V values
+    protected static void flipV(List<Quad> quads) {
+        for (Quad quad : quads) {
+            for (Vertex vertex : quad.getVertices()) {
+                vertex.getUv().y = 1 - vertex.getUv().y;
+            }
+        }
     }
 
     protected void addAllFinishedData() {
@@ -262,7 +273,6 @@ public class Exporter {
         for (RenderType type : impl.fixedBuffers.keySet()) {
             preCountVertices.put(type, impl.getBuilderRaw(type).vertices);
         }
-
     }
 
     protected void postCountLayerVertices() {
@@ -361,7 +371,6 @@ public class Exporter {
         BlockPos thisChunkEnd = new BlockPos(Math.max(currentX - chunkXOffset, endPos.getX()), lowerHeightLimit, Math.max(currentZ - chunkZOffset, endPos.getZ()));
         Random random = new Random();
         MatrixStack matrixStack = new MatrixStack();
-        matrixStack.translate(-playerX, 0, -playerZ);
 
         for (BlockPos pos : BlockPos.betweenClosed(thisChunkStart, thisChunkEnd)) {
             BlockState state = world.getBlockState(pos);
@@ -387,23 +396,31 @@ public class Exporter {
                 }
             }
 
-            // The rendering logic is roughly copied from
+            // The rendering logic is roughly taken from ChunkRenderDispatcher.compile with multiple tweaks
             FluidState fluidState = world.getFluidState(pos);
             IModelData modelData = ModelDataManager.getModelData(world, pos);
             for (RenderType rendertype : RenderType.chunkBufferLayers()) {
                 if (!fluidState.isEmpty() && RenderTypeLookup.canRenderInLayer(fluidState, rendertype)) {
                     BitSet forceRender = getForcedDirections(pos);
                     BufferBuilder bufferbuilder = impl.getBuffer(rendertype);  // automatically starts buffer
-                    blockRendererDispatcher.renderLiquid(pos, world, bufferbuilder, fluidState, playerX, playerZ, forceRender);
+                    blockRendererDispatcher.renderLiquid(pos, world, bufferbuilder, fluidState, 0, 0, forceRender);
                 }
 
                 if (state.getRenderShape() != BlockRenderType.INVISIBLE && RenderTypeLookup.canRenderInLayer(state, rendertype)) {
-                    BitSet forceRender = getForcedDirections(pos);
-                    BufferBuilder bufferbuilder = impl.getBuffer(rendertype);   // automatically starts buffer
                     matrixStack.pushPose();
                     matrixStack.translate(pos.getX(), pos.getY(), pos.getZ());
-                    // TODO: use renderBlock? potentially support for more blocks, like animated type blocks?
-                    blockRendererDispatcher.renderModel(state, pos, world, matrixStack, bufferbuilder, forceRender, random, modelData);
+                    BitSet forceRender = getForcedDirections(pos);
+                    BufferBuilder bufferbuilder = impl.getBuffer(rendertype);   // automatically starts buffer
+                    // TODO: setting a fixed seed is not enough, texture randomness is seemingly baked into block positions/states
+                    //  could potentially modify the block state before rendering to remove this. This would greatly decrease mesh size
+                    blockRendererDispatcher.renderModel(state, pos, world, matrixStack, bufferbuilder, forceRender, random, modelData, randomize);
+
+                    // use renderBlock? potentially support for more blocks, like animated type blocks?
+//                  if (state.getRenderShape() == BlockRenderType.ENTITYBLOCK_ANIMATED && modelData != null) {
+//                      int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright
+//                      blockRendererDispatcher.renderBlock(state, matrixStack, impl, packedLight, OverlayTexture.NO_OVERLAY, modelData);
+//                  }
+
                     matrixStack.popPose();
                 }
             }
@@ -432,6 +449,10 @@ public class Exporter {
 
         addAllFinishedData();
         updateQuadTextures();
+        blockQuadsMap.values().forEach(this::translateQuads);
+        entityUUIDQuadsMap.values().forEach(this::translateQuads);
+        blockQuadsMap.values().forEach(Exporter::flipV);
+        entityUUIDQuadsMap.values().forEach(Exporter::flipV);
         mc.options.ambientOcclusion = preAO;
         mc.options.entityShadows = preShadows;
 
@@ -459,8 +480,8 @@ public class Exporter {
 
         // Currently this is a memoized linear check over all an atlasTexture's TextureAtlasSprites to find
         // which TextureAtlasSprite contains the given UVBounds
-        // If this is ever too slow a structure like a quadtree or spatial hashing could be used
-        return atlasUVToSpriteCache.computeIfAbsent(Pair.of(resource, uvBounds), k -> {
+        // If this is ever too slow a structure like a quadtree or spatial hashing could be used, but profiling shows this to be a non-issue
+        return atlasUVToSpriteCache.computeIfAbsent(Pair.of(resource.toString(), new UVBounds(uvBounds)), k -> {
             for (ResourceLocation name : atlasTexture.texturesByName.keySet()) {
                 TextureAtlasSprite sprite = atlasTexture.getSprite(name);
                 float uMin = sprite.getU0();
@@ -482,21 +503,47 @@ public class Exporter {
         quads.addAll(entityUUIDQuadsMap.values().stream().flatMap(Collection::stream).collect(Collectors.toList()));
         for (Quad quad : quads) {
             Pair<ResourceLocation, TextureAtlasSprite> nameAndTexture = getTextureFromAtlas(quad.getResource(), quad.getUvBounds());
-            if (nameAndTexture == null) {
-                continue;
+            boolean didModifyUV = false;
+            // allowed error is very small by default
+            float allowableErrorU = 0.00001f;
+            float allowableErrorV = 0.00001f;
+            if (nameAndTexture != null) {
+                quad.setResource(nameAndTexture.getLeft());
+                TextureAtlasSprite texture = nameAndTexture.getRight();
+                // recalculate the allowable error based on the texture's size so that any rounding does not change
+                // the texture's display on a texture-pixel level
+                allowableErrorU = 1.0F / texture.getWidth() / 2.0F;
+                allowableErrorV = 1.0F / texture.getHeight() / 2.0F;
+                for (Vertex vertex : quad.getVertices()) {
+                    Vector2f uv = vertex.getUv();
+                    uv.x = (uv.x - texture.getU0()) / (texture.getU1() - texture.getU0());
+                    uv.y = (uv.y - texture.getV0()) / (texture.getV1() - texture.getV0());
+                }
+                quad.setTexture(texture);
+                didModifyUV = true;
             }
 
-            quad.setResource(nameAndTexture.getLeft());
-            TextureAtlasSprite texture = nameAndTexture.getRight();
+            // round the UV coordinates to a 0 or 1 if they are close enough based on an allowable error amount
             for (Vertex vertex : quad.getVertices()) {
                 Vector2f uv = vertex.getUv();
-                // these values could potentially be conditionally rounded if the precision loss would not be >= 1 pixel
-                // such rounding might help in the future when optimizing the exported mesh
-                uv.x = (uv.x - texture.getU0()) / (texture.getU1() - texture.getU0());
-                uv.y = (uv.y - texture.getV0()) / (texture.getV1() - texture.getV0());
+                float roundedU = Math.round(uv.x);
+                float roundedV = Math.round(uv.y);
+                boolean shouldRoundU = Math.abs(roundedU - uv.x) < allowableErrorU;
+                boolean shouldRoundV = Math.abs(roundedV - uv.y) < allowableErrorV;
+                uv.x = shouldRoundU ? roundedU : uv.x;
+                uv.y = shouldRoundV ? roundedV : uv.y;
+                didModifyUV |= (shouldRoundU || shouldRoundV);
             }
-            quad.updateUvBounds();
-            quad.setTexture(texture);
+            if (didModifyUV) quad.updateUvBounds();
+        }
+    }
+
+    // Translate the quad vertex positions (in place) such that the players original position is the center of the import (except for y coordinates)
+    protected void translateQuads(List<Quad> quads) {
+        for (Quad quad : quads) {
+            for (Vertex vertex : quad.getVertices()) {
+                vertex.getPosition().translate(-playerX, 0, -playerZ);
+            }
         }
     }
 }

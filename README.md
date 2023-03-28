@@ -5,27 +5,38 @@ A Minecraft Forge mod for exporting parts of a world to a Wavefront .obj file.
 
 # Usage and More Information
 
-Install the mod jar like you would any other forge mod. 
+Install the mod jar like you would any other forge mod, by copying the .jar file into your forge mods directory. 
 
-When in game, run: `/worldexport {radius} {lower} {upper}` where each argument is an integer. 
+When in game, run: `/worldexport {radius} {lower} {upper} {optimizeMesh} {randomizeTextures}`
 
-`radius`: the radius of the export extending from your current position, in blocks
+`radius`: the radius of the export extending from your current position, in blocks (integer) (required)
 
-`lower`: optional lower height limit (y level)
+`lower`: lower height y level (integer) (optional:default=0)
 
-`upper`: optional upper height limit (y level)
+`upper`: upper height y level (integer) (optional:default=255)
 
-Example usage:
+`optimizeMesh`: if the resulting mesh should be optimized (true/false) (optional:default=true)
 
-`/worldexport 128 50 255`
+`randomizeTextures`: if the program should export textures exactly as they appear in Minecraft, with slight differences in textures patterning for some blocks (true/false) (optional:default=false)
 
-Note: Due to clientside command limitations with 1.15.2, 
-the /worldexport command will not show up as a registered command, but will work fine.
+Using `true` for `randomizeTextures` will significantly reduce how well the mesh optimization performs due to slight differences in texture patterns between some blocks.
+
+<br />
+Example usage with default values:
+
+`/worldexport 64 0 255 true false`
+
+<br />
+Note: Due to clientside command limitations with 1.16.5, the /worldexport command will not show up as a registered command. Regardless, it functions properly.
+
+Note: Due to limitations with the Wavefront .obj format, a new texture must be created for each different texture color. Consider turning **Biome Blend**, found 
+in Minecraft's video settings, to a lower value (or off) to reduce the number of textures required for biome color transitions.
 
 A few key features:
 * Resource/texture packs are supported
 * Modded blocks are supported including tile entity renderers
 * Entities like beds, chests, item frames, mobs, players, dropped items, etc. are supported
+* Includes mesh optimizations with texture tiling for smaller file sizes and fewer vertices/faces
 
 Current limitations:
 * The export radius is limited by your render distance
