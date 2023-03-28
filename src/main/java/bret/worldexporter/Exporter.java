@@ -56,7 +56,6 @@ public class Exporter {
     protected final Map<BlockPos, ArrayList<Quad>> blockQuadsMap = new HashMap<>();
     protected final Map<RenderType, Map<UUID, Pair<Integer, Integer>>> layerUUIDVerticesMap = new HashMap<>();
     protected final Map<UUID, ArrayList<Quad>> entityUUIDQuadsMap = new HashMap<>();
-    protected final Map<RenderType, Integer> preCountVertices = new HashMap<>();
     protected final Map<RenderType, ResourceLocation> renderResourceLocationMap = new HashMap<>();
     protected final CustomImpl impl;
     private final Map<Pair<String, UVBounds>, Pair<ResourceLocation, TextureAtlasSprite>> atlasUVToSpriteCache = new HashMap<>();
@@ -260,34 +259,18 @@ public class Exporter {
         blockQuadsMap.clear();
         layerUUIDVerticesMap.clear();
         entityUUIDQuadsMap.clear();
-        preCountVertices.clear();
-    }
-
-    protected void preCountLayerVertices() {
-        preCountVertices.clear();
-
-        // fallback buffer count, key of null, since it has no type
-        preCountVertices.put(null, impl.builder.vertices);  // null refers to the fallback bufferBuilder, which has no single render type
-
-        // loop over Impl renderTypes, get buffer, get vertex count from that, and store it
-        for (RenderType type : impl.fixedBuffers.keySet()) {
-            preCountVertices.put(type, impl.getBuilderRaw(type).vertices);
-        }
+        impl.clearVerticesCounts();
     }
 
     protected void postCountLayerVertices() {
-        // post counting and data handling for fallback buffer is handled with callback in CustomImpl.finish()
-
-        // loop over Impl renderTypes, get buffer, get vertex count from that, and store the difference from pre count
-        for (RenderType type : impl.fixedBuffers.keySet()) {
-            int prevCount = preCountVertices.get(type);
-            int difference = impl.getBuilderRaw(type).vertices - prevCount;
-            if (difference == 0) continue;
+        // store the pre- and post-count of used vertices for each renderType for the relevant block/entity, except for fallback buffer types
+        for (Map.Entry<RenderType, Pair<Integer, Integer>> entry : impl.getClearVerticesCounts().entrySet()) {
+            RenderType type = entry.getKey();
 
             if (lastFixedIsBlock) {
-                layerPosVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastFixedBlock, Pair.of(prevCount, difference));
+                layerPosVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastFixedBlock, entry.getValue());
             } else {
-                layerUUIDVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastFixedEntityUUID, Pair.of(prevCount, difference));
+                layerUUIDVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastFixedEntityUUID, entry.getValue());
             }
         }
     }
@@ -378,7 +361,6 @@ public class Exporter {
                 continue;
             }
 
-            preCountLayerVertices();
             preBlock(pos.immutable());
 
             if (state.hasTileEntity()) {
@@ -429,7 +411,6 @@ public class Exporter {
         // export all entities within chunk
         for (Entity entity : world.getEntities(null, new AxisAlignedBB(thisChunkStart, thisChunkEnd))) {
             preEntity(entity.getUUID());
-            preCountLayerVertices();
             matrixStack.pushPose();
             float partialTicks = 0;
             int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright

@@ -8,11 +8,9 @@ import net.minecraft.client.renderer.model.ModelBakery;
 import net.minecraft.util.Util;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import org.apache.commons.lang3.tuple.Pair;
 
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 
 @OnlyIn(Dist.CLIENT)
 public class CustomImpl implements IRenderTypeBuffer {
@@ -21,6 +19,8 @@ public class CustomImpl implements IRenderTypeBuffer {
     protected final Set<BufferBuilder> startedBuffers = Sets.newHashSet();
     private final Exporter exporter;
     public Optional<RenderType> lastState = Optional.empty();
+    // keeps track of vertexCounts for used buffers (updated when a new buffer is pulled from getBuffer)
+    private Map<RenderType, Integer> typeUsedVertices;
 
     public CustomImpl(Exporter exporter) {
         this.builder = new BufferBuilder(2097152);
@@ -57,6 +57,7 @@ public class CustomImpl implements IRenderTypeBuffer {
             });
         });
         this.exporter = exporter;
+        typeUsedVertices = new HashMap<>(fixedBuffers.size());
     }
 
     private static void put(Object2ObjectLinkedOpenHashMap<RenderType, BufferBuilder> pMapBuilders, RenderType pRenderType) {
@@ -84,7 +85,30 @@ public class CustomImpl implements IRenderTypeBuffer {
             this.lastState = optional;
         }
 
+        // Update pre vertices count for previously uncounted buffer. Does nothing if it already has a count
+        // fallback builder does not require counts to be updated since it uses the DrawState count
+        if (bufferbuilder != this.builder) {
+            typeUsedVertices.putIfAbsent(p_getBuffer_1_, bufferbuilder.vertices);
+        }
+
         return bufferbuilder;
+    }
+
+    // returns map of a RenderType to the pre- and post-counts of vertices for that RenderType since the last call to this function
+    public Map<RenderType, Pair<Integer, Integer>> getClearVerticesCounts() {
+        Map<RenderType, Pair<Integer, Integer>> counts = new HashMap<>();
+        for (RenderType type : typeUsedVertices.keySet()) {
+            int preCount = typeUsedVertices.get(type);
+            int count = getBuilderRaw(type).vertices - preCount;
+            if (count == 0) continue;
+            counts.put(type, Pair.of(preCount, count));
+        }
+        typeUsedVertices.clear();
+        return counts;
+    }
+
+    public void clearVerticesCounts() {
+        typeUsedVertices.clear();
     }
 
     public BufferBuilder getBuilderRaw(RenderType pRenderType) {
