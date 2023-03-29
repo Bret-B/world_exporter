@@ -23,8 +23,8 @@ public class WorldExporter {
         MinecraftForge.EVENT_BUS.register(this);
     }
 
-    private static void execute(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize) {
-        ObjExporter objExporter = new ObjExporter(player, radius, lower, upper, optimizeMesh, randomize);
+    private static void execute(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize, int threads) {
+        ObjExporter objExporter = new ObjExporter(player, radius, lower, upper, optimizeMesh, randomize, threads);
         try {
             objExporter.export("world.obj", "world.mtl");
         } catch (IOException e) {
@@ -47,21 +47,25 @@ public class WorldExporter {
         int upper = 255;
         boolean optimizeMesh = true;
         boolean randomizeTextureOrientation = false;
+        int threads = 4;
         try {
-            radius = params.length >= 1 ? Integer.parseInt(params[0]) : 64;
+            radius = params.length >= 1 ? Integer.parseInt(params[0]) : radius;
             lower = params.length >= 2 ? Integer.parseInt(params[1]) : lower;
             upper = params.length >= 3 ? Integer.parseInt(params[2]) : upper;
             optimizeMesh = params.length >= 4 ? Boolean.parseBoolean(params[3]) : optimizeMesh;
             randomizeTextureOrientation = params.length >= 5 ? Boolean.parseBoolean(params[4]) : randomizeTextureOrientation;
+            threads = params.length >= 6 ? Integer.parseInt(params[5]) : threads;
         } catch (Exception ignored) {
             Minecraft.getInstance().player.sendMessage(
                     new StringTextComponent("There was an error parsing the command arguments. " +
-                            "Example usage: " + cmdName + " 64 0 255 true false"),
+                            "Example usage: " + cmdName + " 64 0 255 true false 4"),
                     Util.NIL_UUID
             );
             return;
         }
 
-        execute(Minecraft.getInstance().player, radius, lower, upper, optimizeMesh, randomizeTextureOrientation);
+        threads = Math.max(1, Math.min(8, threads));
+
+        execute(Minecraft.getInstance().player, radius, lower, upper, optimizeMesh, randomizeTextureOrientation, threads);
     }
 }

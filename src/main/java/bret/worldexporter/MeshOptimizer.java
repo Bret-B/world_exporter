@@ -8,8 +8,8 @@ import java.util.*;
 
 public class MeshOptimizer {
     private final static int ROUND_BITS = 11;
+    private static final Comparator<Quad> quadComparator = getQuadComparator();
     private final Map<Edge, List<Quad>> edgeQuadsMap = new HashMap<>();
-    private final Comparator<Quad> quadComparator = getQuadComparator();
 
     // returns true if a quad can be tiled for mesh optimization
     private static boolean canTile(Quad quad) {

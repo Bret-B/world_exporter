@@ -24,11 +24,13 @@ public class ObjExporter extends Exporter {
     // uv texture coordinates cache (tag vt) for the .obj output which maps the uv value to its number in the file
     private final Map<Vector2f, Integer> uvCache = new LRUCache<>(5000);
     private final int[] vertUVIndices = new int[8];
+    private final int threadCount;
     private int vertCount = 0;
     private int uvCount = 0;
 
-    public ObjExporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize) {
+    public ObjExporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize, int threads) {
         super(player, radius, lower, upper, optimizeMesh, randomize);
+        this.threadCount = threads;
     }
 
     public void export(String objFilenameIn, String mtlFilenameIn) throws IOException {
@@ -46,9 +48,7 @@ public class ObjExporter extends Exporter {
              FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlbw = new BufferedWriter(mtlWriter, 1 << 10)) {  // 1 KB buffer
             objbw.write("mtllib " + mtlFilenameIn + "\n\n");
 
-            while (hasMoreData()) {
-                ArrayList<Quad> allQuads = getNextChunkData();
-
+            for (ArrayList<Quad> allQuads = getQuads(threadCount); allQuads != null; allQuads = getQuads(threadCount)) {
                 Map<Integer, ArrayList<Quad>> quadsForModel = new HashMap<>();
                 for (Quad quad : allQuads) {
                     Pair<ResourceLocation, Integer> model = Pair.of(quad.getResource(), quad.getColor());
@@ -57,7 +57,8 @@ public class ObjExporter extends Exporter {
                     if (!modelToIdMap.containsKey(model)) {
                         BufferedImage image = getImage(quad);
                         if (image == null || ImgUtils.isCompletelyTransparent(image)) {
-                            LOGGER.warn("Skipped face with texture: " + quad.getResource());
+                            String reason = image == null ? " because Image was null" : " because Image was completely transparent";
+                            LOGGER.warn("Skipped face with texture: " + quad.getResource() + reason);
                             modelToIdMap.put(model, -1);
                             continue;
                         }

@@ -18,12 +18,15 @@ public class CustomImpl implements IRenderTypeBuffer {
     public final Map<RenderType, BufferBuilder> fixedBuffers;
     protected final Set<BufferBuilder> startedBuffers = Sets.newHashSet();
     private final Exporter exporter;
+    private final ExporterThread thread;
     public Optional<RenderType> lastState = Optional.empty();
     // keeps track of vertexCounts for used buffers (updated when a new buffer is pulled from getBuffer)
     private Map<RenderType, Integer> typeUsedVertices;
 
-    public CustomImpl(Exporter exporter) {
+    public CustomImpl(Exporter exporter, ExporterThread thread) {
         this.builder = new BufferBuilder(2097152);
+        this.exporter = exporter;
+        this.thread = thread;
         RegionRenderCacheBuilder basicBuilder = new RegionRenderCacheBuilder();
         RegionRenderCacheBuilder basicBuilder2 = new RegionRenderCacheBuilder();
         this.fixedBuffers = Util.make(new Object2ObjectLinkedOpenHashMap<>(), (map) -> {
@@ -56,7 +59,6 @@ public class CustomImpl implements IRenderTypeBuffer {
                 put(map, type);
             });
         });
-        this.exporter = exporter;
         typeUsedVertices = new HashMap<>(fixedBuffers.size());
     }
 
@@ -78,7 +80,7 @@ public class CustomImpl implements IRenderTypeBuffer {
             if (this.startedBuffers.add(bufferbuilder)) {
                 bufferbuilder.begin(p_getBuffer_1_.mode(), p_getBuffer_1_.format());
                 if (bufferbuilder == this.builder) {
-                    exporter.setLastFallbackInfo();
+                    thread.setLastFallbackInfo();
                 }
             }
 
@@ -141,13 +143,14 @@ public class CustomImpl implements IRenderTypeBuffer {
                         RenderType.Type renderTypeExtended = (RenderType.Type) pRenderType;
                         RenderType.State renderState = renderTypeExtended.state;
                         renderState.textureState.texture.ifPresent(resourceLocation ->
-                                exporter.renderResourceLocationMap.put(pRenderType, resourceLocation));
+                                exporter.putRenderResourceLocation(pRenderType, resourceLocation)
+                        );
                     }
 
                     if (bufferbuilder == this.builder) {
                         // If the buffer being finished is the fallback buffer, the data needs to be processed immediately before it is overwritten/finished
                         // The callback function should call finishDrawing on the buffer before consuming the data
-                        exporter.fallbackBufferCallback();
+                        thread.fallbackBufferCallback();
                     } else {
                         bufferbuilder.end();
                     }
