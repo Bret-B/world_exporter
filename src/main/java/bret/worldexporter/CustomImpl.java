@@ -24,19 +24,19 @@ public class CustomImpl implements IRenderTypeBuffer {
 
     public CustomImpl(Exporter exporter) {
         this.builder = new BufferBuilder(2097152);
-        RegionRenderCacheBuilder tempBuilder = new RegionRenderCacheBuilder();
-        RegionRenderCacheBuilder tempBuilder2 = new RegionRenderCacheBuilder();  // FIXME: slightly hacky - requires some extra memory
+        RegionRenderCacheBuilder basicBuilder = new RegionRenderCacheBuilder();
+        RegionRenderCacheBuilder basicBuilder2 = new RegionRenderCacheBuilder();
         this.fixedBuffers = Util.make(new Object2ObjectLinkedOpenHashMap<>(), (map) -> {
-            map.put(Atlases.solidBlockSheet(), tempBuilder.builder(RenderType.solid()));
-            map.put(Atlases.cutoutBlockSheet(), tempBuilder.builder(RenderType.cutout()));
-            map.put(Atlases.bannerSheet(), tempBuilder.builder(RenderType.cutoutMipped()));
-            map.put(Atlases.translucentCullBlockSheet(), tempBuilder.builder(RenderType.translucent()));
+            map.put(Atlases.solidBlockSheet(), basicBuilder.builder(RenderType.solid()));
+            map.put(Atlases.cutoutBlockSheet(), basicBuilder.builder(RenderType.cutout()));
+            map.put(Atlases.bannerSheet(), basicBuilder.builder(RenderType.cutoutMipped()));
+            map.put(Atlases.translucentCullBlockSheet(), basicBuilder.builder(RenderType.translucent()));
 
             // Add basic renderTypes aliases
-            map.put(RenderType.solid(), tempBuilder2.builder(RenderType.solid()));
-            map.put(RenderType.cutout(), tempBuilder2.builder(RenderType.cutout()));
-            map.put(RenderType.cutoutMipped(), tempBuilder2.builder(RenderType.cutoutMipped()));
-            map.put(RenderType.translucent(), tempBuilder2.builder(RenderType.translucent()));
+            map.put(RenderType.solid(), basicBuilder2.builder(RenderType.solid()));
+            map.put(RenderType.cutout(), basicBuilder2.builder(RenderType.cutout()));
+            map.put(RenderType.cutoutMipped(), basicBuilder2.builder(RenderType.cutoutMipped()));
+            map.put(RenderType.translucent(), basicBuilder2.builder(RenderType.translucent()));
 
             put(map, Atlases.shieldSheet());
             put(map, Atlases.bedSheet());

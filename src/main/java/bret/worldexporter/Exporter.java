@@ -7,10 +7,7 @@ import net.minecraft.block.BlockRenderType;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
-import net.minecraft.client.renderer.BufferBuilder;
-import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.renderer.RenderTypeLookup;
-import net.minecraft.client.renderer.WorldRenderer;
+import net.minecraft.client.renderer.*;
 import net.minecraft.client.renderer.texture.AtlasTexture;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.renderer.texture.Texture;
@@ -40,6 +37,7 @@ import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
 
 import java.awt.image.BufferedImage;
+import java.awt.image.RasterFormatException;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.*;
@@ -49,6 +47,20 @@ import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
 public class Exporter {
     protected static final Logger LOGGER = LogManager.getLogger(WorldExporter.MODID);
+    private static final int OTHER_ORDER = 3;
+    private static final Map<RenderType, Integer> renderOrder = new HashMap<RenderType, Integer>() {{
+        put(RenderType.solid(), 0);
+        put(Atlases.solidBlockSheet(), 0);
+        put(RenderType.cutout(), 1);
+        put(Atlases.cutoutBlockSheet(), 1);
+        put(RenderType.cutoutMipped(), 2);
+        put(RenderType.tripwire(), Integer.MAX_VALUE - 1);
+        put(RenderType.translucent(), Integer.MAX_VALUE);
+        put(RenderType.translucentMovingBlock(), Integer.MAX_VALUE);
+        put(RenderType.translucentNoCrumbling(), Integer.MAX_VALUE);
+        put(Atlases.translucentItemSheet(), Integer.MAX_VALUE);
+        put(Atlases.translucentCullBlockSheet(), Integer.MAX_VALUE);
+    }};
     protected final Minecraft mc = Minecraft.getInstance();
     protected final CustomBlockRendererDispatcher blockRendererDispatcher = new CustomBlockRendererDispatcher(mc.getBlockRenderer().getBlockModelShaper(), mc.getBlockColors());
     protected final Map<ResourceLocation, BufferedImage> atlasCacheMap = new HashMap<>();
@@ -60,11 +72,14 @@ public class Exporter {
     protected final CustomImpl impl;
     private final Map<Pair<String, UVBounds>, Pair<ResourceLocation, TextureAtlasSprite>> atlasUVToSpriteCache = new HashMap<>();
     private final ClientWorld world = Objects.requireNonNull(mc.level);
+    private final Map<Pair<ResourceLocation, UVBounds>, Float> uvTransparencyCache = new HashMap<>();
+    private final Comparator<Quad> quadComparator = getQuadSort();
     private final int lowerHeightLimit;
     private final int upperHeightLimit;
     private final int playerX;
     private final int playerZ;
     private final boolean randomize;
+    private final boolean optimizeMesh;
     private final BlockPos startPos;  // higher values
     private final BlockPos endPos;  // lower values
     private int currentX;
@@ -76,8 +91,9 @@ public class Exporter {
     private UUID lastFallbackEntityUUID;
     private boolean lastFallbackIsBlock;
 
-    public Exporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean randomize) {
+    public Exporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize) {
         this.randomize = randomize;
+        this.optimizeMesh = optimizeMesh;
         lowerHeightLimit = lower;
         upperHeightLimit = upper;
         playerX = (int) player.getX();
@@ -121,6 +137,35 @@ public class Exporter {
             for (Vertex vertex : quad.getVertices()) {
                 vertex.getUv().y = 1 - vertex.getUv().y;
             }
+        }
+    }
+
+    protected static void removeDuplicateQuads(Collection<ArrayList<Quad>> quadsArrays) {
+        for (ArrayList<Quad> quads : quadsArrays) {
+            Set<Integer> added = new HashSet<>();
+            ArrayList<Quad> uniqueQuads = new ArrayList<>();
+            for (int i = 0; i < quads.size(); ++i) {
+                if (added.contains(i)) {
+                    continue;
+                }
+
+                Quad q1 = quads.get(i);
+                uniqueQuads.add(q1);
+                added.add(i);
+
+                for (int j = i + 1; j < quads.size(); ++j) {
+                    if (added.contains(j)) {
+                        continue;
+                    }
+
+                    if (q1.isEquivalentTo(quads.get(j))) {
+                        added.add(j);  // treat the quad as already added since it is equivalent to one that has already been added
+                    }
+                }
+            }
+
+            quads.clear();
+            quads.addAll(uniqueQuads);
         }
     }
 
@@ -336,9 +381,14 @@ public class Exporter {
         return bitSet;
     }
 
-    public boolean getNextChunkData() {
+    public boolean hasMoreData() {
+        return currentX >= endPos.getX() && currentZ >= endPos.getZ();
+    }
+
+    public ArrayList<Quad> getNextChunkData() {
+        ArrayList<Quad> quads = new ArrayList<>();
         if (currentX < endPos.getX() || currentZ < endPos.getZ()) {
-            return false;
+            return quads;
         }
 
         resetBuilders();
@@ -347,14 +397,25 @@ public class Exporter {
         mc.options.ambientOcclusion = AmbientOcclusionStatus.OFF;
         mc.options.entityShadows = false;
 
+        // critical section?
         // ((a % b) + b) % b gives true modulus instead of just remainder
         int chunkXOffset = ((currentX % 16) + 16) % 16;
         int chunkZOffset = ((currentZ % 16) + 16) % 16;
         BlockPos thisChunkStart = new BlockPos(currentX, upperHeightLimit, currentZ);
         BlockPos thisChunkEnd = new BlockPos(Math.max(currentX - chunkXOffset, endPos.getX()), lowerHeightLimit, Math.max(currentZ - chunkZOffset, endPos.getZ()));
+        // Update the current position to be the starting position of the next chunk export (which may be
+        // outside the selected boundary, accounted for at the beginning of the function call).
+        currentX -= (thisChunkStart.getX() - thisChunkEnd.getX() + 1);
+        if (currentX < endPos.getX()) {
+            currentX = startPos.getX();
+            currentZ -= (thisChunkStart.getZ() - thisChunkEnd.getZ() + 1);
+        }
+        // TODO: check if chunk for start pos is unloaded (empty? null?) -- world.getChunkSource().getChunkNow()
+        //  if its unloaded, and Dist is Client, use ForgeChunkManager to forcibly load the chunk.
+        //  then, wait up to a maximum amount of time for the chunk to be loaded? or use a different approach?
+
         Random random = new Random();
         MatrixStack matrixStack = new MatrixStack();
-
         for (BlockPos pos : BlockPos.betweenClosed(thisChunkStart, thisChunkEnd)) {
             BlockState state = world.getBlockState(pos);
             if (state.getBlock().isAir(state, world, pos)) {
@@ -428,22 +489,31 @@ public class Exporter {
 
         addAllFinishedData();
         updateQuadTextures();
+
+        // translate quads so that the player x,z are the origin
         blockQuadsMap.values().forEach(this::translateQuads);
         entityUUIDQuadsMap.values().forEach(this::translateQuads);
+
+        // Minecraft uses a flipped V coordinate
         blockQuadsMap.values().forEach(Exporter::flipV);
         entityUUIDQuadsMap.values().forEach(Exporter::flipV);
+
+        // fix quad data issues such as overlapping/duplicate faces
+        fixOverlaps(blockQuadsMap.values());
+        fixOverlaps(entityUUIDQuadsMap.values());
+
+        blockQuadsMap.values().forEach(quads::addAll);
+        entityUUIDQuadsMap.values().forEach(quads::addAll);
+
+        if (optimizeMesh) {
+            MeshOptimizer meshOptimizer = new MeshOptimizer();
+            quads = meshOptimizer.optimize(quads);
+        }
+
         mc.options.ambientOcclusion = preAO;
         mc.options.entityShadows = preShadows;
 
-        // Update the current position to be the starting position of the next chunk export (which may be
-        // outside the selected boundary, accounted for at the beginning of the function call).
-        currentX -= (thisChunkStart.getX() - thisChunkEnd.getX() + 1);
-        if (currentX < endPos.getX()) {
-            currentX = startPos.getX();
-            currentZ -= (thisChunkStart.getZ() - thisChunkEnd.getZ() + 1);
-        }
-
-        return true;
+        return quads;
     }
 
     public BufferedImage getAtlasImage(ResourceLocation resource) {
@@ -515,6 +585,105 @@ public class Exporter {
             }
             if (didModifyUV) quad.updateUvBounds();
         }
+    }
+
+    // update any quads that overlap by translating by a small multiple of their normal
+    protected void fixOverlaps(Collection<ArrayList<Quad>> quadsArrays) {
+        removeDuplicateQuads(quadsArrays);
+        for (ArrayList<Quad> quads : quadsArrays) {
+            sortQuads(quads);
+            Set<Integer> toCheck = new HashSet<>();
+            for (int i = 0, size = quads.size(); i < size; ++i) {
+                toCheck.add(i);
+            }
+            boolean reCheck = !toCheck.isEmpty();
+            while (reCheck) {
+                Set<Integer> newToCheck = new HashSet<>();
+                for (int quadIndex : toCheck) {
+                    Quad first = quads.get(quadIndex);
+                    ArrayList<Integer> overlapsWithFirst = new ArrayList<>();
+                    for (int j = quadIndex + 1; j < quads.size(); ++j) {
+                        if (first.overlaps(quads.get(j))) {
+                            overlapsWithFirst.add(j);
+                        }
+                    }
+
+                    if (overlapsWithFirst.isEmpty()) {
+                        continue;
+                    }
+
+                    Vector3f posTranslate = (Vector3f) first.getNormal().scale(0.00075f);
+                    for (int overlapQuad : overlapsWithFirst) {
+                        quads.get(overlapQuad).translate(posTranslate);
+                        newToCheck.add(overlapQuad);
+                    }
+                }
+
+                reCheck = !newToCheck.isEmpty();
+                toCheck = newToCheck;
+            }
+        }
+    }
+
+    protected BufferedImage getImage(Quad quad) {
+        BufferedImage image;
+        TextureAtlasSprite texture = quad.getTexture();
+        if (texture == null) {
+            image = Exporter.computeImage(quad.getResource());
+            image = ImgUtils.tintImage(image, quad.getColor());
+        } else {
+            image = getAtlasSubImage(texture, quad.getColor());
+        }
+        return image;
+    }
+
+    protected BufferedImage getAtlasSubImage(TextureAtlasSprite texture, int color) {
+        UVBounds originalUV = new UVBounds(texture.getU0(), texture.getU1(), texture.getV0(), texture.getV1());
+        return getImageFromUV(texture.atlas().location(), originalUV, color);
+    }
+
+    // Returns a subimage of a resourceLocation's texture image determined by uvbounds and tints with provided color
+    protected BufferedImage getImageFromUV(ResourceLocation resource, UVBounds uvbound, int color) {
+        BufferedImage baseImage = getAtlasImage(resource);
+        if (baseImage == null) return null;
+
+        uvbound = uvbound.clamped();
+
+        if (uvbound.uDist() <= 0.000001f || uvbound.vDist() <= 0.000001f) return null;
+
+        int width = Math.max(1, Math.round(baseImage.getWidth() * uvbound.uDist()));
+        int height = Math.max(1, Math.round(baseImage.getHeight() * uvbound.vDist()));
+        int startX = Math.round(baseImage.getWidth() * uvbound.uMin);
+        int startY = Math.round(baseImage.getHeight() * uvbound.vMin);
+        BufferedImage textureImg = null;
+        try {
+            textureImg = baseImage.getSubimage(startX, startY, width, height);
+        } catch (RasterFormatException exception) {
+            LOGGER.warn("Unable to get the texture for uvbounds: " + width + "w, " + height + "h, " + startX + "x, " + startY + "y, " + "with Uv bounds: " +
+                    String.join(",", String.valueOf(uvbound.uMin), String.valueOf(uvbound.uMax), String.valueOf(uvbound.vMin), String.valueOf(uvbound.vMax)));
+        }
+        if (textureImg != null && color != -1) {
+            textureImg = ImgUtils.tintImage(textureImg, color);
+        }
+        return textureImg;
+    }
+
+    private void sortQuads(ArrayList<Quad> quads) {
+        quads.sort(quadComparator);
+    }
+
+    private Comparator<Quad> getQuadSort() {
+        return (quad1, quad2) -> {
+            RenderType quad1Layer = quad1.getType();
+            RenderType quad2Layer = quad2.getType();
+            if (quad1Layer == quad2Layer) {
+                float avg1 = uvTransparencyCache.computeIfAbsent(Pair.of(quad1.getResource(), quad1.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad1)));
+                float avg2 = uvTransparencyCache.computeIfAbsent(Pair.of(quad2.getResource(), quad2.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad2)));
+                return Float.compare(avg1, avg2);
+            } else {
+                return Integer.compare(renderOrder.getOrDefault(quad1Layer, OTHER_ORDER), renderOrder.getOrDefault(quad2Layer, OTHER_ORDER));
+            }
+        };
     }
 
     // Translate the quad vertex positions (in place) such that the players original position is the center of the import (except for y coordinates)
