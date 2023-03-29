@@ -7,7 +7,7 @@ A Minecraft Forge mod for exporting parts of a world to a Wavefront .obj file.
 
 Install the mod jar like you would any other forge mod, by copying the .jar file into your forge mods directory. 
 
-When in game, run: `/worldexport {radius} {lower} {upper} {optimizeMesh} {randomizeTextures}`
+When in game, run: `/worldexport {radius} {lower} {upper} {optimizeMesh} {randomizeTextures} {threads}`
 
 `radius`: the radius of the export extending from your current position, in blocks (integer) (required)
 
@@ -19,12 +19,17 @@ When in game, run: `/worldexport {radius} {lower} {upper} {optimizeMesh} {random
 
 `randomizeTextures`: if the program should export textures exactly as they appear in Minecraft, with slight differences in textures patterning for some blocks (true/false) (optional:default=false)
 
+`threads`: how many threads to use when exporting (integer) (optional:default=4,max=8)
+
 Using `true` for `randomizeTextures` will significantly reduce how well the mesh optimization performs due to slight differences in texture patterns between some blocks.
+
+Using a value higher than `1` for `threads` may result in a slightly higher vertex count and will require more memory. 
+The offset order for overlapping faces may also be slightly worse, but this is highly unlikely to have any noticeable effect.
 
 <br />
 Example usage with default values:
 
-`/worldexport 64 0 255 true false`
+`/worldexport 64 0 255 true false 4`
 
 Note: Due to clientside command limitations with 1.16.5, the /worldexport command will not show up as a registered command. Regardless, it functions properly.
 

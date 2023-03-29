@@ -37,14 +37,15 @@ description = '''
 Exports portions of a world to a Wavefront .obj file.
 
 Use the command as follows:
-/worldexport radius lower upper optimizeMesh randomizeTextures
+/worldexport radius lower upper optimizeMesh randomizeTextures threads
 radius: the radius of the export extending from your current position, in blocks (integer)
 lower: optional lower height limit (y level) (integer)
 upper: optional upper height limit (y level) (integer)
 optimizeMesh: if the resulting mesh should be optimized (true/false)
 randomizeTextures: if the program should export textures exactly as they appear in Minecraft, with slight differences in textures patterning for some blocks (true/false)
+threads: how many threads to use for the export (integer)
 Arguments other than the radius are optional, with default values given in the below example:
-/worldexport 64 0 255 true false
+/worldexport 64 0 255 true false 4
 
 Exports can be found in your Minecraft instance folder, inside the 'worldexporter' folder
 '''

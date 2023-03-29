@@ -18,25 +18,28 @@ public class CustomImpl implements IRenderTypeBuffer {
     public final Map<RenderType, BufferBuilder> fixedBuffers;
     protected final Set<BufferBuilder> startedBuffers = Sets.newHashSet();
     private final Exporter exporter;
+    private final ExporterThread thread;
     public Optional<RenderType> lastState = Optional.empty();
     // keeps track of vertexCounts for used buffers (updated when a new buffer is pulled from getBuffer)
     private Map<RenderType, Integer> typeUsedVertices;
 
-    public CustomImpl(Exporter exporter) {
+    public CustomImpl(Exporter exporter, ExporterThread thread) {
         this.builder = new BufferBuilder(2097152);
-        RegionRenderCacheBuilder tempBuilder = new RegionRenderCacheBuilder();
-        RegionRenderCacheBuilder tempBuilder2 = new RegionRenderCacheBuilder();  // FIXME: slightly hacky - requires some extra memory
+        this.exporter = exporter;
+        this.thread = thread;
+        RegionRenderCacheBuilder basicBuilder = new RegionRenderCacheBuilder();
+        RegionRenderCacheBuilder basicBuilder2 = new RegionRenderCacheBuilder();
         this.fixedBuffers = Util.make(new Object2ObjectLinkedOpenHashMap<>(), (map) -> {
-            map.put(Atlases.solidBlockSheet(), tempBuilder.builder(RenderType.solid()));
-            map.put(Atlases.cutoutBlockSheet(), tempBuilder.builder(RenderType.cutout()));
-            map.put(Atlases.bannerSheet(), tempBuilder.builder(RenderType.cutoutMipped()));
-            map.put(Atlases.translucentCullBlockSheet(), tempBuilder.builder(RenderType.translucent()));
+            map.put(Atlases.solidBlockSheet(), basicBuilder.builder(RenderType.solid()));
+            map.put(Atlases.cutoutBlockSheet(), basicBuilder.builder(RenderType.cutout()));
+            map.put(Atlases.bannerSheet(), basicBuilder.builder(RenderType.cutoutMipped()));
+            map.put(Atlases.translucentCullBlockSheet(), basicBuilder.builder(RenderType.translucent()));
 
             // Add basic renderTypes aliases
-            map.put(RenderType.solid(), tempBuilder2.builder(RenderType.solid()));
-            map.put(RenderType.cutout(), tempBuilder2.builder(RenderType.cutout()));
-            map.put(RenderType.cutoutMipped(), tempBuilder2.builder(RenderType.cutoutMipped()));
-            map.put(RenderType.translucent(), tempBuilder2.builder(RenderType.translucent()));
+            map.put(RenderType.solid(), basicBuilder2.builder(RenderType.solid()));
+            map.put(RenderType.cutout(), basicBuilder2.builder(RenderType.cutout()));
+            map.put(RenderType.cutoutMipped(), basicBuilder2.builder(RenderType.cutoutMipped()));
+            map.put(RenderType.translucent(), basicBuilder2.builder(RenderType.translucent()));
 
             put(map, Atlases.shieldSheet());
             put(map, Atlases.bedSheet());
@@ -56,7 +59,6 @@ public class CustomImpl implements IRenderTypeBuffer {
                 put(map, type);
             });
         });
-        this.exporter = exporter;
         typeUsedVertices = new HashMap<>(fixedBuffers.size());
     }
 
@@ -78,7 +80,7 @@ public class CustomImpl implements IRenderTypeBuffer {
             if (this.startedBuffers.add(bufferbuilder)) {
                 bufferbuilder.begin(p_getBuffer_1_.mode(), p_getBuffer_1_.format());
                 if (bufferbuilder == this.builder) {
-                    exporter.setLastFallbackInfo();
+                    thread.setLastFallbackInfo();
                 }
             }
 
@@ -141,13 +143,14 @@ public class CustomImpl implements IRenderTypeBuffer {
                         RenderType.Type renderTypeExtended = (RenderType.Type) pRenderType;
                         RenderType.State renderState = renderTypeExtended.state;
                         renderState.textureState.texture.ifPresent(resourceLocation ->
-                                exporter.renderResourceLocationMap.put(pRenderType, resourceLocation));
+                                exporter.putRenderResourceLocation(pRenderType, resourceLocation)
+                        );
                     }
 
                     if (bufferbuilder == this.builder) {
                         // If the buffer being finished is the fallback buffer, the data needs to be processed immediately before it is overwritten/finished
                         // The callback function should call finishDrawing on the buffer before consuming the data
-                        exporter.fallbackBufferCallback();
+                        thread.fallbackBufferCallback();
                     } else {
                         bufferbuilder.end();
                     }
