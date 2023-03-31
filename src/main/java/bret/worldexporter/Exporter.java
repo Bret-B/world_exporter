@@ -25,12 +25,17 @@ import java.awt.image.BufferedImage;
 import java.awt.image.RasterFormatException;
 import java.nio.IntBuffer;
 import java.util.*;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
 public class Exporter {
     protected static final Logger LOGGER = LogManager.getLogger(WorldExporter.MODID);
-    private static final int CHUNKS_PER_THREAD = 10;
+    private static final int CHUNKS_PER_CONSUME = 10;
     private static final int OTHER_ORDER = 3;
     private static final Map<RenderType, Integer> renderOrder = new HashMap<RenderType, Integer>() {{
         put(RenderType.solid(), 0);
@@ -50,24 +55,28 @@ public class Exporter {
     protected final Minecraft mc = Minecraft.getInstance();
     protected final CustomBlockRendererDispatcher blockRendererDispatcher = new CustomBlockRendererDispatcher(mc.getBlockRenderer().getBlockModelShaper(), mc.getBlockColors());
     protected final Map<ResourceLocation, BufferedImage> atlasCacheMap = new HashMap<>();
-    protected final Map<RenderType, ResourceLocation> renderResourceLocationMap = new HashMap<>();
     protected final ClientWorld world = Objects.requireNonNull(mc.level);
     private final Map<Pair<ResourceLocation, UVBounds>, Pair<ResourceLocation, TextureAtlasSprite>> atlasUVToSpriteCache = new HashMap<>();
     private final Map<Pair<ResourceLocation, UVBounds>, Float> uvTransparencyCache = new HashMap<>();
     private final Comparator<Quad> quadComparator = getQuadSort();
     private final Comparator<Quad> quadComparatorThreaded = getQuadSortThreaded();
+    private final ArrayBlockingQueue<Runnable> mainThreadTasks = new ArrayBlockingQueue<>(10);
+    private final int threads;
     private final int lowerHeightLimit;
     private final int upperHeightLimit;
     private final int playerX;
     private final int playerZ;
     private final BlockPos startPos;  // higher values
     private final BlockPos endPos;  // lower values
+    private AmbientOcclusionStatus preAO = mc.options.ambientOcclusion;
+    private boolean preShadows = mc.options.entityShadows;
     private int currentX;
     private int currentZ;
 
-    public Exporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize) {
+    public Exporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize, int threads) {
         this.randomize = randomize;
         this.optimizeMesh = optimizeMesh;
+        this.threads = threads;
         lowerHeightLimit = lower;
         upperHeightLimit = upper;
         playerX = (int) player.getX();
@@ -79,6 +88,7 @@ public class Exporter {
     }
 
     // only ResourceLocations with an associated Texture should be used
+    // may only be called on the main thread due to the GL11 calls
     public static BufferedImage computeImage(ResourceLocation resource) {
         Texture texture = Minecraft.getInstance().getTextureManager().getTexture(resource);
         if (texture == null) return null;
@@ -146,51 +156,57 @@ public class Exporter {
         return format.getElements().contains(DefaultVertexFormats.ELEMENT_POSITION) && format.getElements().contains(DefaultVertexFormats.ELEMENT_UV0);
     }
 
-    public ArrayList<Quad> getQuads(int threadCount) {
-        if (!hasMoreData()) return null;
-
-        AmbientOcclusionStatus preAO = mc.options.ambientOcclusion;
-        boolean preShadows = mc.options.entityShadows;
+    // required to change MC options for proper export rendering
+    public void setup() {
+        preAO = mc.options.ambientOcclusion;
+        preShadows = mc.options.entityShadows;
         mc.options.ambientOcclusion = AmbientOcclusionStatus.OFF;
         mc.options.entityShadows = false;
+    }
 
-        // threadCount of 1 uses only the current thread
-        if (threadCount == 1) {
-            ExporterThread exporterThread = new ExporterThread(this, getMultipleChunkPos(CHUNKS_PER_THREAD), false);
-            exporterThread.run();
-
-            mc.options.ambientOcclusion = preAO;
-            mc.options.entityShadows = preShadows;
-
-            return exporterThread.getQuads();
-        }
-
-        // if multithreaded, start the threads with the next threadCount chunks and wait for them to finish.
-        // could improve this by using an executor/FixedThreadPool and callbacks
-        ArrayList<Thread> threads = new ArrayList<>();
-        ArrayList<ExporterThread> exporterThreads = new ArrayList<>();
-        for (int i = 0; i < threadCount && hasMoreData(); ++i) {
-            ExporterThread exporterThread = new ExporterThread(this, getMultipleChunkPos(CHUNKS_PER_THREAD), true);
-            exporterThreads.add(exporterThread);
-            Thread t = new Thread(exporterThread);
-            threads.add(t);
-            t.start();
-        }
-
-        ArrayList<Quad> quads = new ArrayList<>();
-        for (int i = 0; i < threads.size(); ++i) {
-            try {
-                threads.get(i).join();
-                quads.addAll(exporterThreads.get(i).getQuads());
-            } catch (InterruptedException exception) {
-                throw new RuntimeException("Thread was interrupted during export");
-            }
-        }
-
+    // required to reset MC options related rendering
+    public void finish() {
         mc.options.ambientOcclusion = preAO;
         mc.options.entityShadows = preShadows;
+    }
 
-        return quads;
+    // this function MUST be run on the main thread
+    public void exportQuads(Consumer<ArrayList<Quad>> quadConsumer) throws InterruptedException {
+        boolean threaded = threads != 1;
+        List<Pair<BlockPos, BlockPos>> allChunks = getMultipleChunkPos(Integer.MAX_VALUE);
+        ArrayList<Runnable> tasks = new ArrayList<>();
+        ArrayList<List<Pair<BlockPos, BlockPos>>> chunkPartitions = new ArrayList<>();
+        int totalChunks = allChunks.size();
+        int partitionSize = totalChunks / threads;
+        if (totalChunks % threads != 0) partitionSize += 1;
+        // partitions the chunks that need to be exported into `threads` number of partitions
+        for (int i = 0; i < totalChunks; i += partitionSize) {
+            chunkPartitions.add(allChunks.subList(i, Math.min(i + partitionSize, allChunks.size())));
+        }
+        if (chunkPartitions.size() != threads) throw new RuntimeException("chunkPartition size mismatch");
+
+        for (List<Pair<BlockPos, BlockPos>> chunkPartition : chunkPartitions) {
+            tasks.add(new ExporterRunnable(this, chunkPartition, threaded, quadConsumer, CHUNKS_PER_CONSUME));
+        }
+
+        if (threads == 1) {
+            // basic single threaded export ran on the main thread
+            tasks.get(0).run();
+        } else {
+            // create the given amount of threads, and start a runnable on each thread
+            ExecutorService threadPool = Executors.newFixedThreadPool(threads);
+            tasks.forEach(threadPool::submit);
+            threadPool.shutdown();
+            // wait in this loop to do tasks that are required to be run in the main thread, until threads are finished
+            while (!threadPool.isTerminated()) {
+                try {
+                    // poll here in time increments waiting for tasks; recheck if threads are done on timeout
+                    Runnable task = mainThreadTasks.poll(50, TimeUnit.MILLISECONDS);
+                    if (task != null) task.run();
+                } catch (InterruptedException ignored) {
+                }
+            }
+        }
     }
 
     // Returns the facing directions that should be forcibly enabled (at the edge of the export) for a given BlockPos
@@ -233,7 +249,7 @@ public class Exporter {
         return Pair.of(thisChunkStart, thisChunkEnd);
     }
 
-    synchronized Collection<Pair<BlockPos, BlockPos>> getMultipleChunkPos(int count) {
+    synchronized List<Pair<BlockPos, BlockPos>> getMultipleChunkPos(int count) {
         if (!hasMoreData()) return Collections.emptyList();
 
         ArrayList<Pair<BlockPos, BlockPos>> chunks = new ArrayList<>();
@@ -366,7 +382,7 @@ public class Exporter {
         }
     }
 
-    protected synchronized void putRenderResourceLocation(RenderType pRenderType, ResourceLocation resourceLocation) {
-        renderResourceLocationMap.put(pRenderType, resourceLocation);
+    protected void addTask(Runnable task) throws InterruptedException {
+        mainThreadTasks.put(task);
     }
 }

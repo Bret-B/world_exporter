@@ -22,6 +22,7 @@ import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.AxisAlignedBB;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.chunk.Chunk;
 import net.minecraftforge.client.model.ModelDataManager;
 import net.minecraftforge.client.model.data.IModelData;
 import org.apache.commons.lang3.tuple.Pair;
@@ -29,29 +30,36 @@ import org.lwjgl.opengl.GL11;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-class ExporterThread implements Runnable {
-    public final Map<RenderType, Map<BlockPos, Pair<Integer, Integer>>> layerPosVerticesMap = new HashMap<>();
-    public final Map<BlockPos, ArrayList<Quad>> blockQuadsMap = new HashMap<>();
-    public final Map<RenderType, Map<UUID, Pair<Integer, Integer>>> layerUUIDVerticesMap = new HashMap<>();
-    public final Map<UUID, ArrayList<Quad>> entityUUIDQuadsMap = new HashMap<>();
-    public final CustomImpl impl;
+class ExporterRunnable implements Runnable {
+    private final Map<RenderType, Map<BlockPos, Pair<Integer, Integer>>> layerPosVerticesMap = new HashMap<>();
+    private final Map<BlockPos, ArrayList<Quad>> blockQuadsMap = new HashMap<>();
+    private final Map<RenderType, Map<UUID, Pair<Integer, Integer>>> layerUUIDVerticesMap = new HashMap<>();
+    private final Map<UUID, ArrayList<Quad>> entityUUIDQuadsMap = new HashMap<>();
+    private final Map<RenderType, ResourceLocation> renderResourceLocationMap = new HashMap<>();
+    private final CustomImpl impl;
     private final Collection<Pair<BlockPos, BlockPos>> chunkBoundaries;
     private final boolean threaded;
     private final Exporter exporter;
+    private final int chunksPerConsume;
+    private final Consumer<ArrayList<Quad>> quadConsumer;
     private BlockPos lastFixedBlock;
+    private volatile ArrayList<Quad> resultQuads = new ArrayList<>();
     private UUID lastFixedEntityUUID;
     private boolean lastFixedIsBlock;
     private BlockPos lastFallbackBlock;
     private UUID lastFallbackEntityUUID;
     private boolean lastFallbackIsBlock;
-    private volatile ArrayList<Quad> resultQuads = new ArrayList<>();
 
-    public ExporterThread(Exporter exporter, Collection<Pair<BlockPos, BlockPos>> chunkBoundaries, boolean threaded) {
+    public ExporterRunnable(Exporter exporter, Collection<Pair<BlockPos, BlockPos>> chunkBoundaries,
+                            boolean threaded, Consumer<ArrayList<Quad>> quadConsumer, int chunksPerConsume) {
         this.exporter = exporter;
         this.chunkBoundaries = chunkBoundaries;
         this.threaded = threaded;
+        this.quadConsumer = quadConsumer;
+        this.chunksPerConsume = chunksPerConsume;
         impl = new CustomImpl(exporter, this);
     }
 
@@ -61,22 +69,49 @@ class ExporterThread implements Runnable {
 
     @Override
     public void run() {
+        int processedChunks = 0;
         for (Pair<BlockPos, BlockPos> startEnd : chunkBoundaries) {
             resultQuads.addAll(getNextChunkData(startEnd.getLeft(), startEnd.getRight()));
+            ++processedChunks;
+            if (processedChunks == chunksPerConsume) {
+                processedChunks = 0;
+                consumeQuads();
+            }
+        }
+
+        consumeQuads();
+    }
+
+    private void consumeQuads() {
+        ArrayList<Quad> toConsume = resultQuads;
+        resultQuads = new ArrayList<>();
+        if (threaded) {
+            try {
+                exporter.addTask(() -> quadConsumer.accept(toConsume));
+            } catch (Exception e) {
+                Exporter.LOGGER.warn("Unable to handle list of Quads in ExporterRunnable: " + e);
+            }
+        } else {
+            quadConsumer.accept(toConsume);
         }
     }
 
     private ArrayList<Quad> getNextChunkData(BlockPos start, BlockPos end) {
         resetBuilders();
 
-        // TODO: check if chunk for start pos is unloaded (empty? null?) -- world.getChunkSource().getChunkNow()
-        //  if its unloaded, and Dist is Client, use ForgeChunkManager to forcibly load the chunk.
-        //  then, wait up to a maximum amount of time for the chunk to be loaded? or use a different approach?
+        // TODO: There is really no way to forceload a chunk solely on the client. The client would have to
+        //  request a chunk to be sent from the server, which would require the mod to no longer be client only.
+        //  As an alternative, the client could hold on to chunks even when the server asks them to unload them:
+        //  ClientPlayNetHandler::handleForgetLevelChunk(SUnloadChunkPacket pPacket)
+        //  Could use a mixin to cancel that if the chunk is in the correct dimension (?) and within some distance of the player
+        //  the packet could be stored to unload the chunk manually at a later time, which is safe as far as I can tell
+
+        Chunk chunk = exporter.world.getChunkAt(start);
         Random random = new Random();
         MatrixStack matrixStack = new MatrixStack();
         ArrayList<Quad> quads = new ArrayList<>();
         for (BlockPos pos : BlockPos.betweenClosed(start, end)) {
-            BlockState state = exporter.world.getBlockState(pos);
+            BlockState state = chunk.getBlockState(pos);
             if (state.getBlock().isAir(state, exporter.world, pos)) {
                 continue;
             }
@@ -111,12 +146,6 @@ class ExporterThread implements Runnable {
                     BitSet forceRender = exporter.getForcedDirections(pos);
                     BufferBuilder bufferbuilder = impl.getBuffer(rendertype);   // automatically starts buffer
                     exporter.blockRendererDispatcher.renderModel(state, pos, exporter.world, matrixStack, bufferbuilder, forceRender, random, modelData, exporter.randomize);
-
-                    // use renderBlock? potentially support for more blocks, like animated type blocks?
-//                  if (state.getRenderShape() == BlockRenderType.ENTITYBLOCK_ANIMATED && modelData != null) {
-//                      int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright
-//                      blockRendererDispatcher.renderBlock(state, matrixStack, impl, packedLight, OverlayTexture.NO_OVERLAY, modelData);
-//                  }
                     matrixStack.popPose();
                 }
             }
@@ -191,6 +220,7 @@ class ExporterThread implements Runnable {
     }
 
     private void addAllFinishedData() {
+
         Set<RenderType> allTypes = new HashSet<>(layerPosVerticesMap.keySet());
         allTypes.addAll(layerUUIDVerticesMap.keySet());
 
@@ -223,10 +253,7 @@ class ExporterThread implements Runnable {
     }
 
     private void addVertices(ByteBuffer bytebuffer, List<VertexFormatElement> list, ArrayList<Quad> quadsList, RenderType type, int vertexStartIndex, int vertexCount) {
-        ResourceLocation resource;
-        synchronized (exporter) {
-            resource = exporter.renderResourceLocationMap.getOrDefault(type, PlayerContainer.BLOCK_ATLAS);
-        }
+        ResourceLocation resource = renderResourceLocationMap.getOrDefault(type, PlayerContainer.BLOCK_ATLAS);
         Quad quad = new Quad(type, resource);
         boolean skipQuad = false;
         bytebuffer.position(vertexStartIndex);
@@ -435,5 +462,9 @@ class ExporterThread implements Runnable {
                 toCheck = newToCheck;
             }
         }
+    }
+
+    protected void putResource(RenderType type, ResourceLocation location) {
+        renderResourceLocationMap.put(type, location);
     }
 }
