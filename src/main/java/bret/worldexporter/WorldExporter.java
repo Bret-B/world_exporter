@@ -17,7 +17,7 @@ import java.io.IOException;
 public class WorldExporter {
     public static final String MODID = "worldexporter";
     private static final Logger LOGGER = LogManager.getLogger(WorldExporter.MODID);
-    private static final String cmdName = "/worldexport";
+    private static final String CMD_NAME = "/worldexport";
 
     public WorldExporter() {
         MinecraftForge.EVENT_BUS.register(this);
@@ -25,22 +25,29 @@ public class WorldExporter {
 
     private static void execute(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize, int threads) {
         ObjExporter objExporter = new ObjExporter(player, radius, lower, upper, optimizeMesh, randomize, threads);
+        boolean success;
         try {
-            objExporter.export("world.obj", "world.mtl");
+            success = objExporter.export("world.obj", "world.mtl");
         } catch (IOException e) {
-            LOGGER.error("Unable to export world data");
-            Minecraft.getInstance().player.sendMessage(
-                    new StringTextComponent("An error occurred exporting the world."), Util.NIL_UUID);
+            success = false;
+        }
+
+        if (!success) {
+            if (player != null) {
+                LOGGER.error("Unable to export world data");
+                player.sendMessage(
+                        new StringTextComponent("An error occurred when exporting the world."), Util.NIL_UUID);
+            }
         }
     }
 
     @SubscribeEvent
     public void onClientChatEvent(ClientChatEvent event) {
         String msg = event.getOriginalMessage();
-        if (!msg.startsWith(cmdName)) return;
+        if (!msg.startsWith(CMD_NAME)) return;
 
         event.setCanceled(true);  // Client side only: don't send a message to the server
-        String[] params = msg.substring(cmdName.length()).trim().split("\\s+");
+        String[] params = msg.substring(CMD_NAME.length()).trim().split("\\s+");
 
         int radius = 64;
         int lower = 0;
@@ -56,11 +63,14 @@ public class WorldExporter {
             randomizeTextureOrientation = params.length >= 5 ? Boolean.parseBoolean(params[4]) : randomizeTextureOrientation;
             threads = params.length >= 6 ? Integer.parseInt(params[5]) : threads;
         } catch (Exception ignored) {
-            Minecraft.getInstance().player.sendMessage(
-                    new StringTextComponent("There was an error parsing the command arguments. " +
-                            "Example usage: " + cmdName + " 64 0 255 true false 4"),
-                    Util.NIL_UUID
-            );
+            ClientPlayerEntity player = Minecraft.getInstance().player;
+            if (player != null) {
+                player.sendMessage(
+                        new StringTextComponent("There was an error parsing the command arguments. " +
+                                "Example usage: " + CMD_NAME + " 64 0 255 true false 4"),
+                        Util.NIL_UUID
+                );
+            }
             return;
         }
 
