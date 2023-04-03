@@ -17,6 +17,7 @@ out
 build
 run
 logs
+libs
 
 # Ignore Gradle GUI config
 gradle-app.setting

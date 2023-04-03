@@ -179,11 +179,11 @@ public class Exporter {
         int totalChunks = allChunks.size();
         int partitionSize = totalChunks / threads;
         if (totalChunks % threads != 0) partitionSize += 1;
-        // partitions the chunks that need to be exported into `threads` number of partitions
+        // partitions the chunks that need to be exported into at most `threads` number of partitions
         for (int i = 0; i < totalChunks; i += partitionSize) {
-            chunkPartitions.add(allChunks.subList(i, Math.min(i + partitionSize, allChunks.size())));
+            chunkPartitions.add(allChunks.subList(i, Math.min(i + partitionSize, totalChunks)));
         }
-        if (chunkPartitions.size() != threads) throw new RuntimeException("chunkPartition size mismatch");
+        if (chunkPartitions.size() > threads) throw new RuntimeException("chunkPartition size mismatch");
 
         for (List<Pair<BlockPos, BlockPos>> chunkPartition : chunkPartitions) {
             tasks.add(new ExporterRunnable(this, chunkPartition, threaded, quadConsumer, CHUNKS_PER_CONSUME));
@@ -342,7 +342,7 @@ public class Exporter {
         }
     }
 
-    // TODO: cannot use the standard sort in threads because it is unable to access openGL to get the quad's image
+    // cannot use the standard sort in threads because it is unable to access openGL to get the quad's image
     private Comparator<Quad> getQuadSortThreaded() {
         return (quad1, quad2) -> {
             RenderType quad1Layer = quad1.getType();

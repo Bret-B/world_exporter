@@ -98,14 +98,6 @@ class ExporterRunnable implements Runnable {
 
     private ArrayList<Quad> getNextChunkData(BlockPos start, BlockPos end) {
         resetBuilders();
-
-        // TODO: There is really no way to forceload a chunk solely on the client. The client would have to
-        //  request a chunk to be sent from the server, which would require the mod to no longer be client only.
-        //  As an alternative, the client could hold on to chunks even when the server asks them to unload them:
-        //  ClientPlayNetHandler::handleForgetLevelChunk(SUnloadChunkPacket pPacket)
-        //  Could use a mixin to cancel that if the chunk is in the correct dimension (?) and within some distance of the player
-        //  the packet could be stored to unload the chunk manually at a later time, which is safe as far as I can tell
-
         Chunk chunk = exporter.world.getChunkAt(start);
         Random random = new Random();
         MatrixStack matrixStack = new MatrixStack();

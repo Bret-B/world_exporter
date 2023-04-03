@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.7",
+  "package": "bret.worldexporter.mixins",
+  "compatibilityLevel": "JAVA_8",
+  "mixins": [
+    "MixinClientPlayNetHandler"
+  ],
+  "client": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
