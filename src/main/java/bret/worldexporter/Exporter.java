@@ -206,6 +206,11 @@ public class Exporter {
                 } catch (InterruptedException ignored) {
                 }
             }
+
+            // clear out all left-over tasks, if any
+            for (Runnable task : mainThreadTasks) {
+                if (task != null) task.run();
+            }
         }
     }
 
