@@ -15,7 +15,7 @@ public class ImgUtils {
         rgbaFactors[0] = (color & 255) / 255.0f;
         rgbaFactors[1] = ((color >> 8) & 255) / 255.0f;
         rgbaFactors[2] = ((color >> 16) & 255) / 255.0f;
-        rgbaFactors[3] = 1.0f;
+        rgbaFactors[3] = ((color >> 24) & 255) / 255.0f;
         RenderingHints hints = new RenderingHints(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
         hints.add(new RenderingHints(RenderingHints.KEY_DITHERING, RenderingHints.VALUE_DITHER_DISABLE));
         return new RescaleOp(rgbaFactors, offsets, hints).filter(image, null);
