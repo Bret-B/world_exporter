@@ -1,11 +1,14 @@
-package bret.worldexporter;
+package bret.worldexporter.util;
 
+import javax.annotation.Nullable;
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.awt.image.IndexColorModel;
 import java.awt.image.PixelGrabber;
 import java.awt.image.RescaleOp;
 
 public class ImgUtils {
+    @Nullable
     public static BufferedImage tintImage(BufferedImage image, int color) {
         if (color == -1 || image == null) return image;
 
@@ -21,8 +24,47 @@ public class ImgUtils {
         return new RescaleOp(rgbaFactors, offsets, hints).filter(image, null);
     }
 
-    public static boolean imageHasTransparency(BufferedImage image) throws InterruptedException {
-        int[] pixels = getPixelData(image);
+    // Returns the provided image with alpha values set to that of the second image's values, per-pixel.
+    // The first image should have format BufferedImage.TYPE_INT_ARGB;
+    @Nullable
+    public static BufferedImage mergeTransparency(BufferedImage image, BufferedImage transparencyValueImage) {
+        if (image.getType() != BufferedImage.TYPE_INT_ARGB) {
+            throw new RuntimeException("mergeTransparency requires the first argument to be an image of type INT_ARGB");
+        }
+        if (image.getWidth() != transparencyValueImage.getWidth() || image.getHeight() != transparencyValueImage.getHeight()) {
+            throw new RuntimeException("mergeTransparency requires images with the same dimensions");
+        }
+
+        int[] imagePixels;
+        int[] transparencyPixels;
+        try {
+            imagePixels = getPixelData(image);
+            transparencyPixels = getPixelData(transparencyValueImage);
+        } catch (InterruptedException e) {
+            return null;
+        }
+
+        int[] merged = new int[imagePixels.length];
+        // should the transparency value be overwritten, or merged in some way?
+        for (int i = 0; i < imagePixels.length; ++i) {
+            // a factor [0-1.0] denoting how much opaqueness in the original image to keep
+            float opaquenessFactor = (transparencyPixels[i] & 0x000000FF) / 255.0f;  // the "blue" part of the color is used, but it should be grayscale anyway
+            int newAlpha = (imagePixels[i] & 0xFF000000) >>> 24;
+            newAlpha = Math.max(0, Math.min(255, Math.round(newAlpha * opaquenessFactor)));
+            merged[i] = (newAlpha << 24) | (imagePixels[i] & 0x00FFFFFF);
+        }
+        BufferedImage mergedImage = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        mergedImage.setRGB(0, 0, image.getWidth(), image.getHeight(), merged, 0, image.getWidth());
+        return mergedImage;
+    }
+
+    public static boolean imageHasTransparency(BufferedImage image) {
+        int[] pixels;
+        try {
+            pixels = getPixelData(image);
+        } catch (InterruptedException e) {
+            return true;
+        }
         for (int pixel : pixels) {
             if ((pixel & 0xFF000000) != 0xFF000000) {
                 return true;
@@ -79,6 +121,14 @@ public class ImgUtils {
             }
         }
         return true;
+    }
+
+    public static BufferedImage newImageWithFormat(BufferedImage image) {
+        if (image.getColorModel() instanceof IndexColorModel) {
+            return new BufferedImage(image.getWidth(), image.getHeight(), image.getType(), (IndexColorModel) image.getColorModel());
+        } else {
+            return new BufferedImage(image.getWidth(), image.getHeight(), image.getType());
+        }
     }
 
     public static int[] getPixelData(BufferedImage image) throws InterruptedException {

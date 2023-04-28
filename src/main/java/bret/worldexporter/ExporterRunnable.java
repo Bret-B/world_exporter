@@ -9,12 +9,12 @@ import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.RenderTypeLookup;
 import net.minecraft.client.renderer.WorldRenderer;
-import net.minecraft.client.renderer.texture.OverlayTexture;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.renderer.texture.*;
 import net.minecraft.client.renderer.tileentity.TileEntityRenderer;
 import net.minecraft.client.renderer.tileentity.TileEntityRendererDispatcher;
 import net.minecraft.client.renderer.vertex.VertexFormat;
 import net.minecraft.client.renderer.vertex.VertexFormatElement;
+import net.minecraft.crash.ReportedException;
 import net.minecraft.entity.Entity;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.inventory.container.PlayerContainer;
@@ -30,14 +30,20 @@ import org.lwjgl.opengl.GL11;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.RunnableFuture;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
+import static bret.worldexporter.Exporter.LOGGER;
 
 class ExporterRunnable implements Runnable {
     private final Map<RenderType, Map<BlockPos, Pair<Integer, Integer>>> layerPosVerticesMap = new HashMap<>();
     private final Map<BlockPos, ArrayList<Quad>> blockQuadsMap = new HashMap<>();
     private final Map<RenderType, Map<UUID, Pair<Integer, Integer>>> layerUUIDVerticesMap = new HashMap<>();
     private final Map<UUID, ArrayList<Quad>> entityUUIDQuadsMap = new HashMap<>();
+    private final Map<BlockPos, Integer> blockLightValuesMap = new HashMap<>();
     private final Map<RenderType, ResourceLocation> renderResourceLocationMap = new HashMap<>();
     private final CustomImpl impl;
     private final Collection<Pair<BlockPos, BlockPos>> chunkBoundaries;
@@ -69,30 +75,34 @@ class ExporterRunnable implements Runnable {
 
     @Override
     public void run() {
-        int processedChunks = 0;
-        for (Pair<BlockPos, BlockPos> startEnd : chunkBoundaries) {
-            resultQuads.addAll(getNextChunkData(startEnd.getLeft(), startEnd.getRight()));
-            ++processedChunks;
-            if (processedChunks == chunksPerConsume) {
-                processedChunks = 0;
-                consumeQuads();
+        try {
+            int processedChunks = 0;
+            for (Pair<BlockPos, BlockPos> startEnd : chunkBoundaries) {
+                resultQuads.addAll(getNextChunkData(startEnd.getLeft(), startEnd.getRight()));
+                ++processedChunks;
+                if (processedChunks == chunksPerConsume) {
+                    processedChunks = 0;
+                    consumeQuads();
+                }
             }
-        }
 
-        consumeQuads();
+            consumeQuads();
+        } catch (Throwable e) {
+            LOGGER.error("ExporterRunnable crashed while exporting: ", e);
+        }
     }
 
     private void consumeQuads() {
         ArrayList<Quad> toConsume = resultQuads;
         resultQuads = new ArrayList<>();
-        if (threaded) {
-            try {
+        try {
+            if (threaded) {
                 exporter.addTask(() -> quadConsumer.accept(toConsume));
-            } catch (Exception e) {
-                Exporter.LOGGER.warn("Unable to handle list of Quads in ExporterRunnable: " + e);
+            } else {
+                quadConsumer.accept(toConsume);
             }
-        } else {
-            quadConsumer.accept(toConsume);
+        } catch (Exception e) {
+            LOGGER.warn("Unable to handle list of Quads in ExporterRunnable: " + e);
         }
     }
 
@@ -107,7 +117,14 @@ class ExporterRunnable implements Runnable {
             if (state.getBlock().isAir(state, exporter.world, pos)) {
                 continue;
             }
-            preBlock(pos.immutable());
+
+            BlockPos immutablePos = pos.immutable();
+            preBlock(immutablePos);
+            int light = state.getLightValue(exporter.world, immutablePos);
+            if (light != 0) {
+                blockLightValuesMap.put(immutablePos, light);
+            }
+
             if (state.hasTileEntity()) {
                 TileEntity tileentity = exporter.world.getChunkAt(pos).getBlockEntity(pos);
                 if (tileentity != null) {
@@ -138,6 +155,13 @@ class ExporterRunnable implements Runnable {
                     BitSet forceRender = exporter.getForcedDirections(pos);
                     BufferBuilder bufferbuilder = impl.getBuffer(rendertype);   // automatically starts buffer
                     exporter.blockRendererDispatcher.renderModel(state, pos, exporter.world, matrixStack, bufferbuilder, forceRender, random, modelData, exporter.randomize);
+
+                    // TODO: useful?
+//                    if (state.getRenderShape() == BlockRenderType.ENTITYBLOCK_ANIMATED && modelData != null) {
+//                        int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright
+//                        exporter.blockRendererDispatcher.renderBlock(state, matrixStack, impl, packedLight, OverlayTexture.NO_OVERLAY, modelData);
+//                    }
+
                     matrixStack.popPose();
                 }
             }
@@ -150,8 +174,16 @@ class ExporterRunnable implements Runnable {
             matrixStack.pushPose();
             float partialTicks = 0;
             int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright
-            exporter.mc.getEntityRenderDispatcher().render(entity, entity.getX(), entity.getY(), entity.getZ(), entity.yRot,
-                    partialTicks, matrixStack, impl, packedLight);
+            try {
+                // optifine can cause this to crash because it calls parts of RenderSystem which check the thread it is running on
+                // causing a crash on threads other than the render thread
+                // So far, I have seen this occur with leashed entities.
+                // FIXME
+                exporter.mc.getEntityRenderDispatcher().render(entity, entity.getX(), entity.getY(), entity.getZ(), entity.yRot,
+                        partialTicks, matrixStack, impl, packedLight);
+            } catch (Exception e) {
+                LOGGER.error("Unable to export entity: " + entity + "\nDue to exception: ", e);
+            }
             matrixStack.popPose();
             postCountLayerVertices();
         }
@@ -164,9 +196,11 @@ class ExporterRunnable implements Runnable {
         addAllFinishedData();
         updateQuadTextures();
 
-        // translate quads so that the player x,z are the origin
-        blockQuadsMap.values().forEach(exporter::translateQuads);
-        entityUUIDQuadsMap.values().forEach(exporter::translateQuads);
+        // update light values for quads that originate from a block
+        for (BlockPos pos : blockQuadsMap.keySet()) {
+            ArrayList<Quad> quadsForBlock = blockQuadsMap.get(pos);
+            quadsForBlock.forEach(quad -> quad.setLightValue(blockLightValuesMap.getOrDefault(pos, 0)));
+        }
 
         // Minecraft uses a flipped V coordinate
         blockQuadsMap.values().forEach(Exporter::flipV);
@@ -182,6 +216,9 @@ class ExporterRunnable implements Runnable {
             MeshOptimizer meshOptimizer = new MeshOptimizer();
             quads = meshOptimizer.optimize(quads);
         }
+
+        // translate quads so that the player x,z are the origin
+        exporter.translateQuads(quads);
 
         return quads;
     }
@@ -209,10 +246,10 @@ class ExporterRunnable implements Runnable {
         layerUUIDVerticesMap.clear();
         entityUUIDQuadsMap.clear();
         impl.clearVerticesCounts();
+        blockLightValuesMap.clear();
     }
 
     private void addAllFinishedData() {
-
         Set<RenderType> allTypes = new HashSet<>(layerPosVerticesMap.keySet());
         allTypes.addAll(layerUUIDVerticesMap.keySet());
 
@@ -270,7 +307,7 @@ class ExporterRunnable implements Runnable {
                             vertex.setPosition(new Vector3f(bytebuffer.getFloat(), bytebuffer.getFloat(), bytebuffer.getFloat()));
                         } else {
                             bytebuffer.position(bytebuffer.position() + vertexFormatElement.getByteSize());
-                            Exporter.LOGGER.warn("Vertex position element had no supported type, skipping.");
+                            LOGGER.warn("Vertex position element had no supported type, skipping.");
                         }
                         break;
                     case COLOR:
@@ -278,7 +315,7 @@ class ExporterRunnable implements Runnable {
                             vertex.setColor(bytebuffer.getInt());
                         } else {
                             bytebuffer.position(bytebuffer.position() + vertexFormatElement.getByteSize());
-                            Exporter.LOGGER.warn("Vertex color element had no supported type, skipping.");
+                            LOGGER.warn("Vertex color element had no supported type, skipping.");
                         }
                         break;
                     case UV:
@@ -289,7 +326,7 @@ class ExporterRunnable implements Runnable {
                                 // Check for NaNs
                                 if (u != u || v != v) {
                                     skipQuad = true;
-                                    Exporter.LOGGER.warn("Quad being skipped since a vertex had a UV coordinate of NaN.");
+                                    LOGGER.warn("Quad being skipped since a vertex had a UV coordinate of NaN.");
                                     break;
                                 }
 
@@ -299,8 +336,8 @@ class ExporterRunnable implements Runnable {
                                 // TODO: ensure value / 16 / (2^16 - 1) gives proper 0-1 float range
 //                              //  Minecraft.getMinecraft().getTextureManager().getTexture(new ResourceLocation( "minecraft", "dynamic/lightmap_1"))
 //                              //  Discard first short (sky light) and only use second (block light) when implementing emissive lighting?
-                                vertex.setUvlight(new Vector2f(bytebuffer.getShort() / 65520.0f, bytebuffer.getShort() / 65520.0f));
-                                break;
+//                                vertex.setUvlight(new Vector2f(bytebuffer.getShort() / 65520.0f, bytebuffer.getShort() / 65520.0f));
+//                                break;
                             default:
                                 // case 1: ELEMENT_UV1 - not currently used, appears in formats like ENTITY
                                 bytebuffer.position(bytebuffer.position() + vertexFormatElement.getByteSize());
@@ -382,25 +419,35 @@ class ExporterRunnable implements Runnable {
         List<Quad> quads = blockQuadsMap.values().stream().flatMap(Collection::stream).collect(Collectors.toList());
         quads.addAll(entityUUIDQuadsMap.values().stream().flatMap(Collection::stream).collect(Collectors.toList()));
         for (Quad quad : quads) {
-            Pair<ResourceLocation, TextureAtlasSprite> nameAndTexture = exporter.getTextureFromAtlas(quad.getResource(), quad.getUvBounds());
+            Texture baseTexture = exporter.mc.textureManager.getTexture(quad.getResource());
+            quad.setTexture(baseTexture);
             boolean didModifyUV = false;
             // allowed error is very small by default
             float allowableErrorU = 0.00001f;
             float allowableErrorV = 0.00001f;
-            if (nameAndTexture != null) {
-                quad.setResource(nameAndTexture.getLeft());
-                TextureAtlasSprite texture = nameAndTexture.getRight();
-                // recalculate the allowable error based on the texture's size so that any rounding does not change
-                // the texture's display on a texture-pixel level
-                allowableErrorU = 1.0F / texture.getWidth() / 2.0F;
-                allowableErrorV = 1.0F / texture.getHeight() / 2.0F;
-                for (Vertex vertex : quad.getVertices()) {
-                    Vector2f uv = vertex.getUv();
-                    uv.x = (uv.x - texture.getU0()) / (texture.getU1() - texture.getU0());
-                    uv.y = (uv.y - texture.getV0()) / (texture.getV1() - texture.getV0());
+            if (baseTexture instanceof AtlasTexture) {
+                Pair<ResourceLocation, TextureAtlasSprite> nameAndTexture = exporter.getTextureFromAtlas(quad.getResource(), quad.getUvBounds());
+                if (nameAndTexture != null) {
+                    quad.setResource(nameAndTexture.getLeft());
+                    TextureAtlasSprite sprite = nameAndTexture.getRight();
+                    // recalculate the allowable error based on the sprite's size so that any rounding does not change
+                    // the sprite's display on a sprite-pixel level
+                    allowableErrorU = 1.0F / sprite.getWidth() / 2.0F;
+                    allowableErrorV = 1.0F / sprite.getHeight() / 2.0F;
+                    for (Vertex vertex : quad.getVertices()) {
+                        Vector2f uv = vertex.getUv();
+                        uv.x = (uv.x - sprite.getU0()) / (sprite.getU1() - sprite.getU0());
+                        uv.y = (uv.y - sprite.getV0()) / (sprite.getV1() - sprite.getV0());
+                    }
+                    quad.setSprite(sprite);
+                    didModifyUV = true;
                 }
-                quad.setTexture(texture);
-                didModifyUV = true;
+            } else if (baseTexture instanceof DynamicTexture) {
+                NativeImage quadImage = ((DynamicTexture) baseTexture).getPixels();
+                if (quadImage != null) {
+                    allowableErrorU = 1.0F / quadImage.getWidth() / 2.0F;
+                    allowableErrorV = 1.0F / quadImage.getHeight() / 2.0F;
+                }
             }
 
             // round the UV coordinates to a 0 or 1 if they are close enough based on an allowable error amount
@@ -421,8 +468,29 @@ class ExporterRunnable implements Runnable {
     // update any quads that overlap by translating by a small multiple of their normal
     protected void fixOverlaps(Collection<ArrayList<Quad>> quadsArrays) {
         Exporter.removeDuplicateQuads(quadsArrays);
+
+        boolean fallbackSort;
+        if (threaded) {
+            // Delegates the task of sorting the quads to the main thread, which can generate the image data required for accurate sorting
+            RunnableFuture<Boolean> task = new FutureTask<>(() -> {
+                quadsArrays.forEach(quads -> exporter.sortQuads(quads, false));
+                return true;
+            });
+            try {
+                exporter.addTask(task);
+                fallbackSort = !task.get();
+            } catch (InterruptedException | ExecutionException e) {
+                LOGGER.warn("Unable to sort quads on main thread, falling back to threaded sort");
+                fallbackSort = true;
+            }
+        } else {
+            fallbackSort = true;
+        }
+        if (fallbackSort) {
+            quadsArrays.forEach(quads -> exporter.sortQuads(quads, threaded));
+        }
+
         for (ArrayList<Quad> quads : quadsArrays) {
-            exporter.sortQuads(quads, threaded);
             Set<Integer> toCheck = new HashSet<>();
             for (int i = 0, size = quads.size(); i < size; ++i) {
                 toCheck.add(i);

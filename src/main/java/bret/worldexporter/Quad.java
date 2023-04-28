@@ -3,7 +3,10 @@ package bret.worldexporter;
 import bret.worldexporter.legacylwjgl.Matrix3f;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
+import bret.worldexporter.util.VectorUtils;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.texture.NativeImage;
+import net.minecraft.client.renderer.texture.Texture;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.util.ResourceLocation;
 
@@ -18,7 +21,9 @@ public class Quad {
     private ResourceLocation resource;
     private int count = 0;
     private UVBounds uvBounds;
-    private TextureAtlasSprite texture;
+    private Texture texture;
+    private TextureAtlasSprite sprite;
+    private int lightValue = 0;
 
     public Quad(RenderType renderType, ResourceLocation resource) {
         this.type = renderType;
@@ -34,6 +39,8 @@ public class Quad {
         this.uvBounds = new UVBounds(other.uvBounds);
         this.resource = other.resource;
         this.texture = other.texture;
+        this.sprite = other.sprite;
+        this.lightValue = other.lightValue;
     }
 
     public boolean overlaps(Quad second) {
@@ -125,16 +132,32 @@ public class Quad {
         this.resource = resource;
     }
 
-    public TextureAtlasSprite getTexture() {
+    public Texture getTexture() {
         return texture;
     }
 
-    public void setTexture(TextureAtlasSprite texture) {
+    public void setTexture(Texture texture) {
         this.texture = texture;
+    }
+
+    public TextureAtlasSprite getSprite() {
+        return sprite;
+    }
+
+    public void setSprite(TextureAtlasSprite sprite) {
+        this.sprite = sprite;
     }
 
     public RenderType getType() {
         return type;
+    }
+
+    public int getLightValue() {
+        return lightValue;
+    }
+
+    public void setLightValue(int lightValue) {
+        this.lightValue = lightValue;
     }
 
     public Vector3f getNormal() {
@@ -168,13 +191,12 @@ public class Quad {
             boolean hasUvEquivalence = false;
             Vertex v1 = vertices[i];
             for (int j = 0; j < quad.count; ++j) {
-                if (v1.getPosition().equals(quad.vertices[j].getPosition())
-                        && v1.getColor() == quad.vertices[j].getColor()
-                        && v1.getUvlight().equals(quad.vertices[j].getUvlight())) {
+                if (Objects.equals(v1.getPosition(), quad.vertices[j].getPosition()) && v1.getColor() == quad.vertices[j].getColor()) {
+//                        && v1.getUvlight().equals(quad.vertices[j].getUvlight())) {
                     hasEquivalence = true;
                 }
 
-                if (v1.getUv().equals(quad.vertices[j].getUv())) {
+                if (Objects.equals(v1.getUv(), quad.vertices[j].getUv())) {
                     hasUvEquivalence = true;
                 }
             }

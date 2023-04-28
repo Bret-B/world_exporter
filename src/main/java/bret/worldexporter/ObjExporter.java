@@ -2,10 +2,14 @@ package bret.worldexporter;
 
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
+import bret.worldexporter.util.ImgUtils;
+import bret.worldexporter.util.LABPBRParser;
+import bret.worldexporter.util.LRUCache;
+import bret.worldexporter.util.OptifineReflector;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.util.ResourceLocation;
-import org.apache.commons.lang3.tuple.Pair;
+import org.apache.commons.lang3.tuple.Triple;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -25,7 +29,12 @@ public class ObjExporter extends Exporter {
     // uv texture coordinates cache (tag vt) for the .obj output which maps the uv value to its number in the file
     private final Map<Vector2f, Integer> uvCache = new LRUCache<>(5000);
     private final int[] vertUVIndices = new int[8];
-    private final Map<Pair<ResourceLocation, Integer>, Integer> modelToIdMap = new HashMap<>();
+    private final Map<Triple<ResourceLocation, Integer, Integer>, Integer> modelToIdMap = new HashMap<>();
+    private final Map<ResourceLocation, String> resourceToNormalMap = new HashMap<>();
+    private final Map<ResourceLocation, String> resourceToHeightMap = new HashMap<>();
+    private final Map<ResourceLocation, String> resourceToMetalMap = new HashMap<>();
+    private final Map<ResourceLocation, String> resourceToRoughnessMap = new HashMap<>();
+    private final Map<Triple<ResourceLocation, Integer, Integer>, String> modelToEmissiveMap = new HashMap<>();
     private final Map<Integer, ResourceLocation> modelIdToLocation = new HashMap<>();
     private int modelCount = 0;
     private int vertCount = 0;
@@ -48,7 +57,8 @@ public class ObjExporter extends Exporter {
             Consumer<ArrayList<Quad>> quadConsumer = (quads) -> {
                 try {
                     writeQuads(quads, objBWriter, mtlBWriter);
-                } catch (IOException e) {
+                } catch (Exception e) {
+                    LOGGER.error("Unable to write quads to the obj/mtl file: ", e);
                     throw new RuntimeException(e);
                 }
             };
@@ -64,7 +74,7 @@ public class ObjExporter extends Exporter {
     private synchronized void writeQuads(ArrayList<Quad> quads, Writer objWriter, Writer mtlWriter) throws IOException {
         Map<Integer, ArrayList<Quad>> quadsForModel = new HashMap<>();
         for (Quad quad : quads) {
-            Pair<ResourceLocation, Integer> model = Pair.of(quad.getResource(), quad.getColor());
+            Triple<ResourceLocation, Integer, Integer> model = Triple.of(quad.getResource(), quad.getColor(), quad.getLightValue());
 
             int modelId;
             if (!modelToIdMap.containsKey(model)) {
@@ -76,22 +86,133 @@ public class ObjExporter extends Exporter {
                     continue;
                 }
 
+                ResourceLocation quadResource = quad.getResource();
                 modelId = modelCount++;
                 modelToIdMap.put(model, modelId);
-                modelIdToLocation.put(modelId, quad.getResource());
-                String modelName = quad.getResource().toString().replaceAll("[^a-zA-Z0-9.-]", "-") + '_' + modelId;
+                modelIdToLocation.put(modelId, quadResource);
+                String modelName = quadResource.toString().replaceAll("[^a-zA-Z0-9.-]", "-") + '_' + modelId;
 
                 File fullTextureFilename = new File(texturePath, modelName + ".png");
-                writeTexture(fullTextureFilename, image);
+                writeTextureOnThread(fullTextureFilename, image);
 
                 // write material information to .mtl file
-                mtlWriter.write("newmtl " + modelName + "\n");
-                try {
-                    if (ImgUtils.imageHasTransparency(image)) {
-                        mtlWriter.write("map_d " + TEXTURE_DIR + '/' + modelName + ".png" + '\n');
-                    }
-                } catch (InterruptedException ignored) {
+                mtlWriter.write("newmtl " + modelName + '\n');
+                if (ImgUtils.imageHasTransparency(image)) {
+                    mtlWriter.write("map_d " + TEXTURE_DIR + '/' + modelName + ".png" + '\n');
                 }
+
+                Runnable emissiveFallback = () -> {
+                    if (quad.getLightValue() != 0) {
+                        String subpath = modelName + "_e.png";
+                        int color = ((quad.getLightValue() * 17) << 24) | 0x00FFFFFF;  // alpha value to "dim" the image by
+                        BufferedImage emissive = ImgUtils.tintImage(image, color);
+                        writeTextureOnThread(new File(texturePath, subpath), emissive);
+                        try {
+                            mtlWriter.write("map_Ke " + TEXTURE_DIR + '/' + subpath + '\n');
+                        } catch (IOException ignored) { }
+                    }
+                };
+
+                if (OptifineReflector.validOptifine) {
+                    NormalData nd = null;
+                    if (!resourceToNormalMap.containsKey(quadResource) || !resourceToHeightMap.containsKey(quadResource)) {
+                        nd = getNormalData(quad);
+                    }
+
+                    String normalTextureName = null;
+                    if (!resourceToNormalMap.containsKey(quadResource) && nd != null) {
+                        BufferedImage normal = LABPBRParser.getNormalImage(nd.x, nd.y, nd.z, nd.cols_width);
+                        if (LABPBRParser.hasNonDefaultNormal(normal)) {
+                            String subpath = modelName + "_n.png";
+                            normalTextureName = TEXTURE_DIR + '/' + subpath;
+                            resourceToNormalMap.put(quadResource, normalTextureName);
+                            writeTextureOnThread(new File(texturePath, subpath), normal);
+                        }
+                    } else {
+                        normalTextureName = resourceToNormalMap.getOrDefault(quadResource, null);
+                    }
+                    if (normalTextureName != null) {
+                        mtlWriter.write("map_Kn " + normalTextureName + '\n');
+                        mtlWriter.write("norm " + normalTextureName + '\n');
+                        mtlWriter.write("map_bump -bm 0.5 " + normalTextureName + '\n');
+                    }
+
+                    // I don't know of any OBJ importers that support heightmaps, but write it anyway: someone might use it
+                    String heightTextureName = null;
+                    if (!resourceToHeightMap.containsKey(quadResource) && nd != null) {
+                        BufferedImage height = LABPBRParser.getHeightmapImage(nd.height, nd.cols_width);
+                        if (LABPBRParser.hasHeight(height)) {
+                            String subpath = modelName + "_h.png";
+                            heightTextureName = TEXTURE_DIR + '/' + subpath;
+                            resourceToHeightMap.put(quadResource, heightTextureName);
+                            writeTextureOnThread(new File(texturePath, subpath), height);
+                        }
+                    }
+//                    else {
+//                        heightTextureName = resourceToHeightMap.getOrDefault(quadResource, null);
+//                    }
+//                    if (heightTextureName != null) {}
+
+                    SpecularData sd = null;
+                    if (!resourceToMetalMap.containsKey(quadResource)
+                            || !resourceToRoughnessMap.containsKey(quadResource)
+                            || !modelToEmissiveMap.containsKey(model)) {
+                        sd = getSpecularData(quad);
+                    }
+
+                    String metalTextureName = null;
+                    if (!resourceToMetalMap.containsKey(quadResource) && sd != null) {
+                        BufferedImage metal = LABPBRParser.getMetalImage(sd.metallic, sd.cols_width);
+                        if (LABPBRParser.hasMetal(metal)) {
+                            String subpath = modelName + "_m.png";
+                            metalTextureName = TEXTURE_DIR + '/' + subpath;
+                            resourceToMetalMap.put(quadResource, metalTextureName);
+                            writeTextureOnThread(new File(texturePath, subpath), metal);
+                        }
+                    } else {
+                        metalTextureName = resourceToMetalMap.getOrDefault(quadResource, null);
+                    }
+                    if (metalTextureName != null) {
+                        mtlWriter.write("map_Pm " + metalTextureName + '\n');
+                    }
+
+                    String roughnessTextureName = null;
+                    if (!resourceToRoughnessMap.containsKey(quadResource) && sd != null) {
+                        BufferedImage roughness = LABPBRParser.getRoughnessImage(sd.roughness, sd.cols_width);
+                        if (LABPBRParser.hasRoughness(roughness)) {
+                            String subpath = modelName + "_r.png";
+                            roughnessTextureName = TEXTURE_DIR + '/' + subpath;
+                            resourceToRoughnessMap.put(quadResource, roughnessTextureName);
+                            writeTextureOnThread(new File(texturePath, subpath), roughness);
+                        }
+                    } else {
+                        roughnessTextureName = resourceToRoughnessMap.getOrDefault(quadResource, null);
+                    }
+                    if (roughnessTextureName != null) {
+                        mtlWriter.write("map_Pr " + roughnessTextureName + '\n');
+                    }
+
+                    String emissiveTextureName = null;
+                    if (!modelToEmissiveMap.containsKey(model) && sd != null) {
+                        BufferedImage emissive = LABPBRParser.getEmissiveImage(sd.emissiveness, sd.cols_width);
+                        if (LABPBRParser.hasEmissive(emissive)) {
+                            String subpath = modelName + "_e.png";
+                            emissiveTextureName = TEXTURE_DIR + '/' + subpath;
+                            BufferedImage newEmissive = ImgUtils.mergeTransparency(image, emissive);
+                            writeTextureOnThread(new File(texturePath, subpath), newEmissive);
+                        } else {
+                            emissiveFallback.run();
+                        }
+                    } else {
+                        emissiveTextureName = modelToEmissiveMap.getOrDefault(model, null);
+                    }
+                    if (emissiveTextureName != null) {
+                        mtlWriter.write("map_Ke " + emissiveTextureName + '\n');
+                    }
+                } else {
+                    emissiveFallback.run();
+                }
+
                 mtlWriter.write("map_Kd " + TEXTURE_DIR + '/' + modelName + ".png" + "\n\n");
             } else {
                 modelId = modelToIdMap.get(model);
@@ -162,5 +283,9 @@ public class ObjExporter extends Exporter {
         } catch (IOException e) {
             LOGGER.debug("Could not save resource texture: " + outputFile);
         }
+    }
+
+    private void writeTextureOnThread(File outputFile, BufferedImage image) {
+        addThreadTask(() -> writeTexture(outputFile, image));
     }
 }

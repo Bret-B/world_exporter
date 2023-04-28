@@ -1,4 +1,4 @@
-package bret.worldexporter;
+package bret.worldexporter.util;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

@@ -1,4 +1,4 @@
-package bret.worldexporter;
+package bret.worldexporter.render;
 
 import com.mojang.blaze3d.matrix.MatrixStack;
 import com.mojang.blaze3d.vertex.IVertexBuilder;

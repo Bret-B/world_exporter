@@ -1,4 +1,4 @@
-package bret.worldexporter;
+package bret.worldexporter.util;
 
 import bret.worldexporter.legacylwjgl.Matrix3f;
 import bret.worldexporter.legacylwjgl.Vector3f;

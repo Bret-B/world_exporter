@@ -1,5 +1,9 @@
 package bret.worldexporter;
 
+import bret.worldexporter.render.CustomBlockRendererDispatcher;
+import bret.worldexporter.util.ImgUtils;
+import bret.worldexporter.util.LABPBRParser;
+import bret.worldexporter.util.OptifineReflector;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.client.renderer.Atlases;
@@ -21,8 +25,10 @@ import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
 
+import javax.annotation.Nullable;
 import java.awt.image.BufferedImage;
 import java.awt.image.RasterFormatException;
+import java.lang.reflect.Field;
 import java.nio.IntBuffer;
 import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -34,7 +40,7 @@ import java.util.function.Consumer;
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
 public class Exporter {
-    protected static final Logger LOGGER = LogManager.getLogger(WorldExporter.MODID);
+    public static final Logger LOGGER = LogManager.getLogger(WorldExporter.MODID);
     private static final int CHUNKS_PER_CONSUME = 10;
     private static final int OTHER_ORDER = 3;
     private static final Map<RenderType, Integer> renderOrder = new HashMap<RenderType, Integer>() {{
@@ -52,15 +58,17 @@ public class Exporter {
     }};
     public final boolean randomize;
     public final boolean optimizeMesh;
+//    public static final OptifineReflector optifineReflector = new OptifineReflector();
     protected final Minecraft mc = Minecraft.getInstance();
     protected final CustomBlockRendererDispatcher blockRendererDispatcher = new CustomBlockRendererDispatcher(mc.getBlockRenderer().getBlockModelShaper(), mc.getBlockColors());
-    protected final Map<ResourceLocation, BufferedImage> atlasCacheMap = new HashMap<>();
+    protected final Map<Integer, BufferedImage> atlasCacheMap = new HashMap<>();
     protected final ClientWorld world = Objects.requireNonNull(mc.level);
     private final Map<Pair<ResourceLocation, UVBounds>, Pair<ResourceLocation, TextureAtlasSprite>> atlasUVToSpriteCache = new HashMap<>();
     private final Map<Pair<ResourceLocation, UVBounds>, Float> uvTransparencyCache = new HashMap<>();
     private final Comparator<Quad> quadComparator = getQuadSort();
     private final Comparator<Quad> quadComparatorThreaded = getQuadSortThreaded();
     private final ArrayBlockingQueue<Runnable> mainThreadTasks = new ArrayBlockingQueue<>(10);
+    private final ExecutorService threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
     private final int threads;
     private final int lowerHeightLimit;
     private final int upperHeightLimit;
@@ -74,6 +82,7 @@ public class Exporter {
     private int currentZ;
 
     public Exporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize, int threads) {
+        OptifineReflector.init();
         this.randomize = randomize;
         this.optimizeMesh = optimizeMesh;
         this.threads = threads;
@@ -87,19 +96,35 @@ public class Exporter {
         currentZ = startPos.getZ();
     }
 
+    public static boolean invalidGlId(int glTextureId) {
+        return (glTextureId == 0 || glTextureId == -1);
+    }
+
+    public static int getGlTextureId(ResourceLocation resource) {
+        Texture texture = Minecraft.getInstance().getTextureManager().getTexture(resource);
+        if (texture == null) return -1;
+        return texture.getId();
+    }
+
     // only ResourceLocations with an associated Texture should be used
     // may only be called on the main thread due to the GL11 calls
+    @Nullable
     public static BufferedImage computeImage(ResourceLocation resource) {
-        Texture texture = Minecraft.getInstance().getTextureManager().getTexture(resource);
-        if (texture == null) return null;
+        return computeImage(getGlTextureId(resource));
+    }
 
-        int textureId = texture.getId();
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, textureId);
+    // may only be called on the main thread due to the GL11 calls
+    @Nullable
+    public static BufferedImage computeImage(int glTextureId) {
+        if (invalidGlId(glTextureId)) return null;
+
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, glTextureId);
         GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
         GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
         int width = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_WIDTH);
         int height = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_HEIGHT);
         int size = width * height;
+        if (size == 0) return null;
         BufferedImage image = new BufferedImage(width, height, TYPE_INT_ARGB);
         IntBuffer buffer = BufferUtils.createIntBuffer(size);
         int[] data = new int[size];
@@ -194,11 +219,11 @@ public class Exporter {
             tasks.get(0).run();
         } else {
             // create the given amount of threads, and start a runnable on each thread
-            ExecutorService threadPool = Executors.newFixedThreadPool(threads);
-            tasks.forEach(threadPool::submit);
-            threadPool.shutdown();
+            ExecutorService exporterThreadPool = Executors.newFixedThreadPool(threads);
+            tasks.forEach(exporterThreadPool::submit);
+            exporterThreadPool.shutdown();
             // wait in this loop to do tasks that are required to be run in the main thread, until threads are finished
-            while (!threadPool.isTerminated()) {
+            while (!exporterThreadPool.isTerminated()) {
                 try {
                     // poll here in time increments waiting for tasks; recheck if threads are done on timeout
                     Runnable task = mainThreadTasks.poll(50, TimeUnit.MILLISECONDS);
@@ -212,6 +237,11 @@ public class Exporter {
                 if (task != null) task.run();
             }
         }
+
+        // finish any other tasks
+        threadPool.shutdown();
+        //noinspection ResultOfMethodCallIgnored
+        threadPool.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
     }
 
     // Returns the facing directions that should be forcibly enabled (at the edge of the export) for a given BlockPos
@@ -266,13 +296,19 @@ public class Exporter {
     }
 
     public synchronized BufferedImage getAtlasImage(ResourceLocation resource) {
-        return atlasCacheMap.computeIfAbsent(resource, Exporter::computeImage);
+        int glTextureId = getGlTextureId(resource);
+        return getAtlasImage(glTextureId);
+    }
+
+    public synchronized BufferedImage getAtlasImage(int glTextureId) {
+        if (invalidGlId(glTextureId)) return null;
+        return atlasCacheMap.computeIfAbsent(glTextureId, Exporter::computeImage);
     }
 
     // returns null if the provided ResourceLocation does not refer to an AtlasTexture
     // could check if this is equivalent to MissingTextureSprite if this is ever a problem
     protected Pair<ResourceLocation, TextureAtlasSprite> getTextureFromAtlas(ResourceLocation resource, UVBounds uvBounds) {
-        Texture texture = Minecraft.getInstance().textureManager.getTexture(resource);
+        Texture texture = mc.textureManager.getTexture(resource);
         if (!(texture instanceof AtlasTexture)) return null;
         AtlasTexture atlasTexture = (AtlasTexture) texture;
 
@@ -296,30 +332,85 @@ public class Exporter {
         }
     }
 
+    @Nullable
     protected BufferedImage getImage(Quad quad) {
         BufferedImage image;
-        TextureAtlasSprite texture = quad.getTexture();
-        if (texture == null) {
+        TextureAtlasSprite sprite = quad.getSprite();
+        if (sprite == null) {
             image = getAtlasImage(quad.getResource());
             image = ImgUtils.tintImage(image, quad.getColor());
         } else {
-            image = getAtlasSubImage(texture, quad.getColor());
+            image = getAtlasSubImage(sprite, quad.getColor());
         }
         return image;
     }
 
-    protected BufferedImage getAtlasSubImage(TextureAtlasSprite texture, int color) {
-        UVBounds originalUV = new UVBounds(texture.getU0(), texture.getU1(), texture.getV0(), texture.getV1());
-        return getImageFromUV(texture.atlas().location(), originalUV, color);
+    // Gets the specular texture for a quad, if any, and separates it into separate images specified in this lab-pbr format:
+    // https://github.com/rre36/lab-pbr/wiki/Specular-Texture-Details
+    @Nullable
+    protected SpecularData getSpecularData(Quad quad) {
+        BufferedImage specularImage = getImageForField(quad, OptifineReflector.multiTexSpec);
+        if (specularImage == null) return null;
+        return LABPBRParser.parseSpecular(specularImage);
     }
 
-    // Returns a subimage of a resourceLocation's texture image determined by uvbounds and tints with provided color
-    protected BufferedImage getImageFromUV(ResourceLocation resource, UVBounds uvbound, int color) {
-        BufferedImage baseImage = getAtlasImage(resource);
+    // Gets the normal texture for a quad, if any, and separates it into separate images specified in this lab-pbr format:
+    // https://github.com/rre36/lab-pbr/wiki/Normal-Texture-Details
+    @Nullable
+    protected NormalData getNormalData(Quad quad) {
+        BufferedImage normalImage = getImageForField(quad, OptifineReflector.multiTexNorm);
+        if (normalImage == null) return null;
+        return LABPBRParser.parseNormal(normalImage);
+    }
+
+    // expects either the norm or spec fields from OptifineReflector
+    @Nullable
+    private BufferedImage getImageForField(Quad quad, Field field) {
+        BufferedImage image;
+        if (quad.getSprite() != null) {
+            TextureAtlasSprite sprite = quad.getSprite();
+            Texture atlas = sprite.atlas();
+            try {
+                Object multiTex = OptifineReflector.multiTex.get(atlas);
+                int glTextureId = field.getInt(multiTex);
+                image = getAtlasSubImage(sprite, -1, glTextureId);
+            } catch (IllegalAccessException e) {
+                LOGGER.warn("Unable to access an optifine field: " + field);
+                return null;
+            }
+        } else if (quad.getTexture() != null) {
+            Texture texture = quad.getTexture();
+            try {
+                Object multiTex = OptifineReflector.multiTex.get(texture);
+                int glTextureId = field.getInt(multiTex);
+                image = getAtlasImage(glTextureId);
+            } catch (IllegalAccessException e) {
+                LOGGER.warn("Unable to access an optifine field: " + field);
+                return null;
+            }
+        } else {
+            return null;
+        }
+
+        return image;
+    }
+
+    protected BufferedImage getAtlasSubImage(TextureAtlasSprite texture, int color, int glTextureId) {
+        UVBounds originalUV = new UVBounds(texture.getU0(), texture.getU1(), texture.getV0(), texture.getV1());
+        return getImageFromUV(glTextureId, originalUV, color);
+    }
+
+    protected BufferedImage getAtlasSubImage(TextureAtlasSprite texture, int color) {
+        UVBounds originalUV = new UVBounds(texture.getU0(), texture.getU1(), texture.getV0(), texture.getV1());
+        return getImageFromUV(texture.atlas().getId(), originalUV, color);
+    }
+
+    // Returns a subimage of a texture's image determined by uvbounds and tints with provided color
+    protected BufferedImage getImageFromUV(int glTextureId, UVBounds uvbound, int color) {
+        BufferedImage baseImage = getAtlasImage(glTextureId);
         if (baseImage == null) return null;
 
         uvbound = uvbound.clamped();
-
         if (uvbound.uDist() <= 0.000001f || uvbound.vDist() <= 0.000001f) return null;
 
         int width = Math.max(1, Math.round(baseImage.getWidth() * uvbound.uDist()));
@@ -389,5 +480,9 @@ public class Exporter {
 
     protected void addTask(Runnable task) throws InterruptedException {
         mainThreadTasks.put(task);
+    }
+
+    protected void addThreadTask(Runnable task) {
+        threadPool.submit(task);
     }
 }

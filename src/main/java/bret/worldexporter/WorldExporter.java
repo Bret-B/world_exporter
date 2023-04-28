@@ -54,7 +54,7 @@ public class WorldExporter {
         return chunkXDist <= playerRender && chunkZDist <= playerRender;
     }
 
-    private static void execute(String msg, ClientWorld world, ClientPlayerEntity player) {
+    private static void execute(String msg, ClientPlayerEntity player) {
         String[] params = msg.substring(CMD_BASE.length()).trim().split("\\s+");
         int radius = 64;
         int lower = 0;
@@ -82,14 +82,22 @@ public class WorldExporter {
         boolean success;
         try {
             success = objExporter.export("world.obj", "world.mtl");
+        } catch (OutOfMemoryError e) {
+            player.sendMessage(new StringTextComponent("Ran out of memory while exporting. " +
+                            "Allocate more memory to Minecraft and try again."),
+                    Util.NIL_UUID
+            );
+            System.gc();
+            return;
         } catch (IOException e) {
+            LOGGER.error("Export failed: " + e);
             success = false;
         }
 
         if (!success) {
-            LOGGER.error("Unable to export world data");
             player.sendMessage(new StringTextComponent("An error occurred when exporting the world."), Util.NIL_UUID);
         }
+        System.gc();
     }
 
     private static void keepRadius(String msg, ClientWorld world, ClientPlayerEntity player) {
@@ -142,7 +150,7 @@ public class WorldExporter {
 
         if (msg.startsWith(CMD_BASE)) {
             event.setCanceled(true);
-            execute(msg, world, player);
+            execute(msg, player);
         }
     }
 }

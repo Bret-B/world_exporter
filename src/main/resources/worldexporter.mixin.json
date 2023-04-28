@@ -3,6 +3,7 @@
   "minVersion": "0.7",
   "package": "bret.worldexporter.mixins",
   "compatibilityLevel": "JAVA_8",
+  "refmap": "worldexporter.mixin.refmap.json",
   "mixins": [
     "MixinClientPlayNetHandler"
   ],

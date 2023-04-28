@@ -1,5 +1,8 @@
-package bret.worldexporter;
+package bret.worldexporter.render;
 
+import bret.worldexporter.Exporter;
+import bret.worldexporter.WorldExporter;
+import bret.worldexporter.util.OptifineReflector;
 import com.mojang.blaze3d.matrix.MatrixStack;
 import com.mojang.blaze3d.vertex.IVertexBuilder;
 import net.minecraft.block.Block;
@@ -18,6 +21,7 @@ import net.minecraft.util.math.vector.Vector3d;
 import net.minecraft.world.IBlockDisplayReader;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import org.apache.logging.log4j.LogManager;
 
 import javax.annotation.Nullable;
 import java.util.BitSet;
@@ -63,6 +67,11 @@ public class CustomBlockModelRenderer {
 
         try {
             return this.renderModelFlat(worldIn, modelIn, stateIn, posIn, matrixIn, buffer, forceRender, randomIn, rand, combinedOverlayIn, modelData);
+
+            // optifine calls renderOverlayModels here, not sure what this does.
+//            if (rendered) {
+//                this.renderOverlayModels(worldIn, modelIn, stateIn, posIn, matrixIn, buffer, combinedOverlayIn, checkSides, randomIn, rand, renderEnv, flag, vector3d);
+//            }
         } catch (Throwable throwable) {
             CrashReport crashreport = CrashReport.forThrowable(throwable, "Tesselating block model");
             CrashReportCategory crashreportcategory = crashreport.addCategory("Block model being tesselated");
@@ -72,15 +81,39 @@ public class CustomBlockModelRenderer {
         }
     }
 
+    @SuppressWarnings("unchecked")
     public boolean renderModelFlat(IBlockDisplayReader worldIn, IBakedModel modelIn, BlockState stateIn, BlockPos posIn, MatrixStack matrixStackIn, IVertexBuilder buffer, BitSet forceRender, Random randomIn, long rand, int combinedOverlayIn, net.minecraftforge.client.model.data.IModelData modelData) {
         boolean flag = false;
         BitSet bitset = new BitSet(3);
+
+        // optifine
+        boolean useOptifine = false;
+        Object renderEnv = null;
+        Object layer = null;
+        if (OptifineReflector.validOptifine) {
+//            RenderEnv renderEnv = buffer.getRenderEnv(stateIn, posIn);
+//            RenderType layer = buffer.getRenderType();
+            try {
+                renderEnv = OptifineReflector.getRenderEnv.invoke(buffer, stateIn, posIn);
+                layer = OptifineReflector.getRenderType.invoke(buffer);
+                useOptifine = true;
+            } catch (Throwable e) {
+                Exporter.LOGGER.warn("Unable to get renderEnv/layer info even though optifine is valid", e);
+            }
+        }
 
         for (Direction direction : Direction.values()) {
             randomIn.setSeed(rand);
             List<BakedQuad> list = modelIn.getQuads(stateIn, direction, randomIn, modelData);
             if (!list.isEmpty() && (Exporter.isForced(forceRender, direction) || Block.shouldRenderFace(stateIn, worldIn, posIn, direction))) {
                 int i = WorldRenderer.getLightColor(worldIn, stateIn, posIn.relative(direction));
+                if (useOptifine) {
+                    try {
+                        list = (List<BakedQuad>) OptifineReflector.getRenderQuads.invoke(list, worldIn, stateIn, posIn, direction, layer, rand, renderEnv);
+                    } catch (Throwable e) {
+                        Exporter.LOGGER.warn("Unable to get modified quad list even though optifine is valid", e);
+                    }
+                }
                 this.renderModelFaceFlat(worldIn, stateIn, posIn, i, combinedOverlayIn, false, matrixStackIn, buffer, list, bitset);
                 flag = true;
             }
@@ -89,6 +122,13 @@ public class CustomBlockModelRenderer {
         randomIn.setSeed(rand);
         List<BakedQuad> list1 = modelIn.getQuads(stateIn, (Direction) null, randomIn, modelData);
         if (!list1.isEmpty()) {
+            if (useOptifine) {
+                try {
+                    list1 = (List<BakedQuad>) OptifineReflector.getRenderQuads.invoke(list1, worldIn, stateIn, posIn, (Direction)null, layer, rand, renderEnv);
+                } catch (Throwable e) {
+                    Exporter.LOGGER.warn("Unable to get modified quad list even though optifine is valid", e);
+                }
+            }
             this.renderModelFaceFlat(worldIn, stateIn, posIn, -1, combinedOverlayIn, true, matrixStackIn, buffer, list1, bitset);
             flag = true;
         }

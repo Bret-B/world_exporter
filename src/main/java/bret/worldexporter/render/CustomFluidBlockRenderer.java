@@ -1,5 +1,6 @@
-package bret.worldexporter;
+package bret.worldexporter.render;
 
+import bret.worldexporter.Exporter;
 import com.mojang.blaze3d.vertex.IVertexBuilder;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.renderer.WorldRenderer;
