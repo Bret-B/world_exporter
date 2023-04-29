@@ -3,7 +3,6 @@ package bret.worldexporter.util;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.renderer.model.BakedQuad;
 import net.minecraft.client.renderer.texture.Texture;
 import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
@@ -56,7 +55,8 @@ public class OptifineReflector {
             multiTexNormTemp = Objects.requireNonNull(ReflectionHandler.getField("net.optifine.shaders.MultiTexID", "norm"));
             multiTexSpecTemp = Objects.requireNonNull(ReflectionHandler.getField("net.optifine.shaders.MultiTexID", "spec"));
             hasOptifineTemp = true;
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         getRenderQuads = getRenderQuadsTemp;
         getRenderEnv = getRenderEnvTemp;

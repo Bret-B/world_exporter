@@ -58,7 +58,7 @@ public class Exporter {
     }};
     public final boolean randomize;
     public final boolean optimizeMesh;
-//    public static final OptifineReflector optifineReflector = new OptifineReflector();
+    //    public static final OptifineReflector optifineReflector = new OptifineReflector();
     protected final Minecraft mc = Minecraft.getInstance();
     protected final CustomBlockRendererDispatcher blockRendererDispatcher = new CustomBlockRendererDispatcher(mc.getBlockRenderer().getBlockModelShaper(), mc.getBlockColors());
     protected final Map<Integer, BufferedImage> atlasCacheMap = new HashMap<>();

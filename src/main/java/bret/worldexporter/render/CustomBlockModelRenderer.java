@@ -1,7 +1,6 @@
 package bret.worldexporter.render;
 
 import bret.worldexporter.Exporter;
-import bret.worldexporter.WorldExporter;
 import bret.worldexporter.util.OptifineReflector;
 import com.mojang.blaze3d.matrix.MatrixStack;
 import com.mojang.blaze3d.vertex.IVertexBuilder;
@@ -21,7 +20,6 @@ import net.minecraft.util.math.vector.Vector3d;
 import net.minecraft.world.IBlockDisplayReader;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import org.apache.logging.log4j.LogManager;
 
 import javax.annotation.Nullable;
 import java.util.BitSet;
@@ -124,7 +122,7 @@ public class CustomBlockModelRenderer {
         if (!list1.isEmpty()) {
             if (useOptifine) {
                 try {
-                    list1 = (List<BakedQuad>) OptifineReflector.getRenderQuads.invoke(list1, worldIn, stateIn, posIn, (Direction)null, layer, rand, renderEnv);
+                    list1 = (List<BakedQuad>) OptifineReflector.getRenderQuads.invoke(list1, worldIn, stateIn, posIn, (Direction) null, layer, rand, renderEnv);
                 } catch (Throwable e) {
                     Exporter.LOGGER.warn("Unable to get modified quad list even though optifine is valid", e);
                 }

@@ -70,7 +70,7 @@ public class LABPBRParser {
             float r = ((pixel & 0x00FF0000) >> 16) / 255.0f;
             float g = ((pixel & 0x0000FF00) >> 8) / 255.0f;
             float b = (pixel & 0x000000FF) / 255.0f;
-            nd.height[i] = ((pixel & 0xFF000000) >>> 24)  / 255.0f;  // height is stored in the alpha map
+            nd.height[i] = ((pixel & 0xFF000000) >>> 24) / 255.0f;  // height is stored in the alpha map
             nd.ao[i] = b;
             nd.x[i] = r;
             nd.y[i] = g;

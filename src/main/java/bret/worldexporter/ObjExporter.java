@@ -109,7 +109,8 @@ public class ObjExporter extends Exporter {
                         writeTextureOnThread(new File(texturePath, subpath), emissive);
                         try {
                             mtlWriter.write("map_Ke " + TEXTURE_DIR + '/' + subpath + '\n');
-                        } catch (IOException ignored) { }
+                        } catch (IOException ignored) {
+                        }
                     }
                 };
 
