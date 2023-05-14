@@ -133,7 +133,25 @@ class ExporterRunnable implements Runnable {
                         matrixStack.pushPose();
                         matrixStack.translate(pos.getX(), pos.getY(), pos.getZ());
                         float partialTicks = 0;
-                        tileEntityRenderer.render(tileentity, partialTicks, matrixStack, impl, i, OverlayTexture.NO_OVERLAY);
+
+                        RunnableFuture<Boolean> renderTileEntity = new FutureTask<>(() -> {
+                            tileEntityRenderer.render(tileentity, partialTicks, matrixStack, impl, i, OverlayTexture.NO_OVERLAY);
+                            return true;
+                        });
+
+                        try {
+                            // This may crash on non-main threads, fallback to main thread if so
+                            renderTileEntity.run();
+                        } catch (Exception e) {
+                            try {
+                                exporter.addTask(renderTileEntity);
+                                if (!renderTileEntity.get()) throw new RuntimeException("Unknown error while exporting tile entity on main thread.");
+                            } catch (Exception e2) {
+                                LOGGER.error("Unable to export tile entity: " + tileentity + "\nDue to multiple exceptions: ", e);
+                                LOGGER.error(e2);
+                            }
+                        }
+
                         matrixStack.popPose();
                     }
                 }
@@ -173,15 +191,25 @@ class ExporterRunnable implements Runnable {
             matrixStack.pushPose();
             float partialTicks = 0;
             int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright
+            RunnableFuture<Boolean> renderEntity = new FutureTask<>(() -> {
+                exporter.mc.getEntityRenderDispatcher().render(entity, entity.getX(), entity.getY(), entity.getZ(), entity.yRot,
+                        partialTicks, matrixStack, impl, packedLight);
+                return true;
+            });
             try {
                 // optifine can cause this to crash because it calls parts of RenderSystem which check the thread it is running on
                 // causing a crash on threads other than the render thread
                 // So far, I have seen this occur with leashed entities.
-                // FIXME
-                exporter.mc.getEntityRenderDispatcher().render(entity, entity.getX(), entity.getY(), entity.getZ(), entity.yRot,
-                        partialTicks, matrixStack, impl, packedLight);
+                // If this happens, fallback to main thread
+                renderEntity.run();
             } catch (Exception e) {
-                LOGGER.error("Unable to export entity: " + entity + "\nDue to exception: ", e);
+                try {
+                    exporter.addTask(renderEntity);
+                    if (!renderEntity.get()) throw new RuntimeException("Unknown error while exporting entity on main thread.");
+                } catch (Exception e2) {
+                    LOGGER.error("Unable to export entity: " + entity + "\nDue to multiple exceptions: ", e);
+                    LOGGER.error(e2);
+                }
             }
             matrixStack.popPose();
             postCountLayerVertices();
