@@ -23,8 +23,7 @@ When in game, run: `/worldexport {radius} {lower} {upper} {optimizeMesh} {random
 
 Using `true` for `randomizeTextures` will significantly reduce how well the mesh optimization performs due to slight differences in texture patterns between some blocks.
 
-Using a value higher than `1` for `threads` may result in a slightly higher vertex count and will require more memory. 
-The offset order for overlapping faces may also be slightly worse, but this is highly unlikely to have any noticeable effect.
+Using a value higher than `1` for `threads` may result in a slightly higher vertex count and will require more memory.
 
 <br />
 Example usage with default values:
