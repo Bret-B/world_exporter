@@ -88,15 +88,15 @@ public class CustomBlockModelRenderer {
         boolean useOptifine = false;
         Object renderEnv = null;
         Object layer = null;
-        if (OptifineReflector.validOptifine) {
-//            RenderEnv renderEnv = buffer.getRenderEnv(stateIn, posIn);
-//            RenderType layer = buffer.getRenderType();
+        if (OptifineReflector.validOptifine && OptifineReflector.isConnectedTextures) {
             try {
+                // RenderEnv renderEnv = buffer.getRenderEnv(stateIn, posIn);
+                // RenderType layer = buffer.getRenderType();
                 renderEnv = OptifineReflector.getRenderEnv.invoke(buffer, stateIn, posIn);
                 layer = OptifineReflector.getRenderType.invoke(buffer);
                 useOptifine = true;
             } catch (Throwable e) {
-                Exporter.LOGGER.warn("Unable to get renderEnv/layer info even though optifine is valid", e);
+                Exporter.LOGGER.warn("Unable to get renderEnv/layer info even though Optifine is valid", e);
             }
         }
 
@@ -109,7 +109,7 @@ public class CustomBlockModelRenderer {
                     try {
                         list = (List<BakedQuad>) OptifineReflector.getRenderQuads.invoke(list, worldIn, stateIn, posIn, direction, layer, rand, renderEnv);
                     } catch (Throwable e) {
-                        Exporter.LOGGER.warn("Unable to get modified quad list even though optifine is valid", e);
+                        Exporter.LOGGER.warn("Unable to get modified quad list even though Optifine is valid", e);
                     }
                 }
                 this.renderModelFaceFlat(worldIn, stateIn, posIn, i, combinedOverlayIn, false, matrixStackIn, buffer, list, bitset);
@@ -124,7 +124,7 @@ public class CustomBlockModelRenderer {
                 try {
                     list1 = (List<BakedQuad>) OptifineReflector.getRenderQuads.invoke(list1, worldIn, stateIn, posIn, (Direction) null, layer, rand, renderEnv);
                 } catch (Throwable e) {
-                    Exporter.LOGGER.warn("Unable to get modified quad list even though optifine is valid", e);
+                    Exporter.LOGGER.warn("Unable to get modified quad list even though Optifine is valid", e);
                 }
             }
             this.renderModelFaceFlat(worldIn, stateIn, posIn, -1, combinedOverlayIn, true, matrixStackIn, buffer, list1, bitset);

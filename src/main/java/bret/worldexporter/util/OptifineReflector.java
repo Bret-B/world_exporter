@@ -15,6 +15,7 @@ import java.util.Objects;
 
 public class OptifineReflector {
     public static boolean validOptifine;
+    public static boolean isConnectedTextures;  // sourced from net.optifine.Config method isConnectedTextures()
     public static MethodHandle getRenderQuads;  // BlockModelCustomizer method getRenderQuads: returns List<BakedQuad>
     public static MethodHandle getRenderEnv;  // BufferBuilder method getRenderEnv: returns RenderEnv instance
     public static MethodHandle getRenderType;  // BufferBuilder method getRenderType: returns RenderType instance
@@ -24,6 +25,7 @@ public class OptifineReflector {
 
     public static void init() {
         boolean hasOptifineTemp = false;
+        boolean isConnectedTexturesTemp = false;
         MethodHandle getRenderQuadsTemp = null;
         MethodHandle getRenderTypeTemp = null;
         MethodHandle getRenderEnvTemp = null;
@@ -54,13 +56,15 @@ public class OptifineReflector {
             multiTexTemp = Objects.requireNonNull(ReflectionHandler.getField(Texture.class, "multiTex"));
             multiTexNormTemp = Objects.requireNonNull(ReflectionHandler.getField("net.optifine.shaders.MultiTexID", "norm"));
             multiTexSpecTemp = Objects.requireNonNull(ReflectionHandler.getField("net.optifine.shaders.MultiTexID", "spec"));
+            isConnectedTexturesTemp = (boolean) Objects.requireNonNull(ReflectionHandler.getMethod("net.optifine.Config", "isConnectedTextures")).invokeExact();
             hasOptifineTemp = true;
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
 
         getRenderQuads = getRenderQuadsTemp;
         getRenderEnv = getRenderEnvTemp;
         getRenderType = getRenderTypeTemp;
+        isConnectedTextures = isConnectedTexturesTemp;
         multiTex = multiTexTemp;
         multiTexNorm = multiTexNormTemp;
         multiTexSpec = multiTexSpecTemp;

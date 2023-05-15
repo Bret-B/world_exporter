@@ -9,14 +9,17 @@ import java.awt.image.BufferedImage;
 public class LABPBRParser {
     private static final int METAL_LOW = 230;
     private static final int METAL_HIGH = 255;
-    private static final int NO_NORMAL = (127 << 16) | (127 << 8) | 181;  // 127, 127, 181 is the default rgb for no normal
+    private static final int NO_NORMAL = (127 << 16) | (127 << 8) | 255;  // 127, 127, 255 is the default RGB for no normal
     private static final int NO_HEIGHT = 0x00FFFFFF;
     private static final int NO_AO = 0x00FFFFFF;
     private static final int NO_METAL = 0;
     private static final int NO_ROUGHNESS = 0x00FFFFFF;
     private static final int NO_EMISSIVE = 0;
+    private static final int DEFAULT_NORMAL_PIX = 0xFF000000 | NO_NORMAL;  // packed ARGB; -8421377
+    private static final int DEFAULT_SPECULAR_PIX = 0;  // packed ARGB
 
     // https://github.com/rre36/lab-pbr/wiki/Specular-Texture-Details
+    // If the entire image has no meaningful data, return null
     @Nullable
     public static SpecularData parseSpecular(BufferedImage specularBase) {
         int[] specular;
@@ -26,22 +29,30 @@ public class LABPBRParser {
             return null;
         }
 
+        if (allPixelsMatch(specular, DEFAULT_SPECULAR_PIX, 0xFFFFFFFF)) {
+            return null;
+        }
+
         SpecularData sd = new SpecularData(specularBase.getWidth(), specularBase.getHeight());
         for (int i = 0; i < specular.length; ++i) {
             int pixel = specular[i];  // packed ARGB format
             int a = (pixel & 0xFF000000) >>> 24;  // must use >>> in order to avoid sign extending for a negative value
-            int r = (pixel & 0x00FF0000) >> 16;
-            int g = (pixel & 0x0000FF00) >> 8;
+            int r = (pixel & 0x00FF0000) >>> 16;
+            int g = (pixel & 0x0000FF00) >>> 8;
             int b = pixel & 0x000000FF;
 
-            sd.emissiveness[i] = a == 255 ? 0.0f : a / 254.0f;  // 0-254 -> 0-100% emissiveness. 255 is 0%
-            sd.roughness[i] = (float) Math.pow(1 - (r / 255.0f), 2);
+            sd.emissiveness[i] = a == 255 ? NO_EMISSIVE : a / 254.0f;  // 0-254 -> 0-100% emissiveness. 255 is 0%
+            // TODO: document export texture map types in README, such as roughness being perceptual, or add option?
+//            sd.roughness[i] = (float) Math.pow(1 - (r / 255.0f), 2);  // roughness, (non-perceptual)
+            sd.roughness[i] = 1.0f - (r / 255.0f);  // perceptual roughness
             // not sure how to handle the custom preset metal values
-            sd.metallic[i] = g / 255.0f;
+            // currently, treat metal values >= 230 as 100% metal (as done by shaders without custom metal support)
             if (isMetal(g)) {
+                sd.metallic[i] = 1.0f;
                 sd.porosity[i] = 1.0f;
                 sd.sss[i] = 0.0f;
             } else {
+                sd.metallic[i] = g / 255.0f;
                 if (b >= 65) {  // b represents a subsurface scattering value
                     sd.porosity[i] = 1.0f;
                     sd.sss[i] = (b - 65) / 190.0f;
@@ -55,8 +66,9 @@ public class LABPBRParser {
     }
 
     // https://github.com/rre36/lab-pbr/wiki/Normal-Texture-Details
+    // If the entire image has no meaningful data, return null
     @Nullable
-    public static NormalData parseNormal(BufferedImage normalBase) {
+    public static NormalData parseNormal(BufferedImage normalBase, boolean outputOpenGLNormals) {
         int[] normal;
         try {
             normal = ImgUtils.getPixelData(normalBase);
@@ -64,17 +76,35 @@ public class LABPBRParser {
             return null;
         }
 
+        if (allPixelsMatch(normal, DEFAULT_NORMAL_PIX, 0xFFFFFFFF)) {
+            return null;
+        }
+
         NormalData nd = new NormalData(normalBase.getWidth(), normalBase.getHeight());
         for (int i = 0; i < normal.length; ++i) {
             int pixel = normal[i];  // packed ARGB format
-            float r = ((pixel & 0x00FF0000) >> 16) / 255.0f;
-            float g = ((pixel & 0x0000FF00) >> 8) / 255.0f;
-            float b = (pixel & 0x000000FF) / 255.0f;
             nd.height[i] = ((pixel & 0xFF000000) >>> 24) / 255.0f;  // height is stored in the alpha map
+            float r = ((pixel & 0x00FF0000) >>> 16) / 255.0f;
+            float g = ((pixel & 0x0000FF00) >>> 8) / 255.0f;
+            float b = (pixel & 0x000000FF) / 255.0f;
+            float r2 = r * 2 - 1;  // r [0, 1] converted to [-1, 1]
+            float g2 = g * 2 - 1;  // g [0, 1] converted to [-1, 1]
             nd.ao[i] = b;
-            nd.x[i] = r;
-            nd.y[i] = g;
-            nd.z[i] = (float) Math.sqrt(1 - (r * r + g * g));
+            float r2Sqr = r2 * r2;
+            float g2Sqr = g2 * g2;
+            // the Z value may be "imaginary" (though always positive due to abs) if r2Sqr + g2Sqr > 1.
+            // the x, y, z values are then normalized by the magnitude using this potentially imaginary Z component
+            float imaginaryZ = (float) Math.sqrt(Math.abs(1 - (r2Sqr + g2Sqr)));
+            float magnitude = (float) Math.sqrt(r2Sqr + g2Sqr + imaginaryZ * imaginaryZ);
+            r2 /= magnitude;
+            g2 /= magnitude;
+            // convert x, y, z back to [0, 1] and save
+            nd.x[i] = (r2 + 1.0f) / 2.0f;
+            float y = (g2 + 1.0f) / 2.0f;
+            nd.y[i] = outputOpenGLNormals ? y : 1.0f - y;
+            // since in actual usage the z value is in the range [0, -1], it is stored in the image in the range [128, 255]
+            // the real Z value, mapped from [0, 1] to [.5, 1]
+            nd.z[i] = (((float) Math.sqrt(Math.abs(clamp(1 - (r2 * r2 + g2 * g2))))) + 1.0f) / 2.0f;
         }
         return nd;
     }
@@ -133,19 +163,33 @@ public class LABPBRParser {
         return !allPixelsMatch(image, NO_EMISSIVE, 0x00FFFFFF);
     }
 
-    public static BufferedImage getEmissiveImage(float[] emissiveData, int width) {
+    public static boolean hasEmissive(float[] data) {
+        for (float v : data) {
+            if (v != NO_EMISSIVE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static BufferedImage getEmissiveImage(float[] emissiveData, int width, boolean squareData) {
+        if (squareData) {
+            for (int i = 0; i < emissiveData.length; ++i) {
+                emissiveData[i] *= emissiveData[i];
+            }
+        }
         return getGrayscaleBufferedImage(emissiveData, width);
     }
 
-    private static BufferedImage getGrayscaleBufferedImage(float[] aoData, int width) {
-//        BufferedImage image = new BufferedImage(width, aoData.length / width, BufferedImage.TYPE_BYTE_GRAY);
-        BufferedImage image = new BufferedImage(width, aoData.length / width, BufferedImage.TYPE_INT_RGB);
-        int[] grayscaleData = new int[aoData.length];
-        for (int i = 0; i < aoData.length; ++i) {
-            int grayValue = clamp(Math.round(aoData[i] * 255.0f));
+    // input data values are effectively clamped into the range [0, 1]
+    private static BufferedImage getGrayscaleBufferedImage(float[] data, int width) {
+        BufferedImage image = new BufferedImage(width, data.length / width, BufferedImage.TYPE_INT_RGB);
+        int[] grayscaleData = new int[data.length];
+        for (int i = 0; i < data.length; ++i) {
+            int grayValue = clamp(Math.round(data[i] * 255.0f));
             grayscaleData[i] = 0xFF000000 | (grayValue << 16) | (grayValue << 8) | grayValue;
         }
-        image.setRGB(0, 0, width, aoData.length / width, grayscaleData, 0, width);
+        image.setRGB(0, 0, width, data.length / width, grayscaleData, 0, width);
         return image;
     }
 
@@ -157,7 +201,11 @@ public class LABPBRParser {
             return false;
         }
 
-        for (int pixel : pixels) {
+        return allPixelsMatch(pixels, pixelValue, mask);
+    }
+
+    private static boolean allPixelsMatch(int[] data, int pixelValue, int mask) {
+        for (int pixel : data) {
             if ((pixel & mask) != pixelValue) {
                 return false;
             }
@@ -171,5 +219,9 @@ public class LABPBRParser {
 
     private static int clamp(int value) {
         return Math.max(0, Math.min(255, value));
+    }
+
+    private static float clamp(float value) {
+        return Math.max(0.0f, Math.min(1.0f, value));
     }
 }

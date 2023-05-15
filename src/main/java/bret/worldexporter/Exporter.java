@@ -58,7 +58,6 @@ public class Exporter {
     }};
     public final boolean randomize;
     public final boolean optimizeMesh;
-    //    public static final OptifineReflector optifineReflector = new OptifineReflector();
     protected final Minecraft mc = Minecraft.getInstance();
     protected final CustomBlockRendererDispatcher blockRendererDispatcher = new CustomBlockRendererDispatcher(mc.getBlockRenderer().getBlockModelShaper(), mc.getBlockColors());
     protected final Map<Integer, BufferedImage> atlasCacheMap = new HashMap<>();
@@ -357,10 +356,10 @@ public class Exporter {
     // Gets the normal texture for a quad, if any, and separates it into separate images specified in this lab-pbr format:
     // https://github.com/rre36/lab-pbr/wiki/Normal-Texture-Details
     @Nullable
-    protected NormalData getNormalData(Quad quad) {
+    protected NormalData getNormalData(Quad quad, boolean outputOpenGLNormals) {
         BufferedImage normalImage = getImageForField(quad, OptifineReflector.multiTexNorm);
         if (normalImage == null) return null;
-        return LABPBRParser.parseNormal(normalImage);
+        return LABPBRParser.parseNormal(normalImage, outputOpenGLNormals);
     }
 
     // expects either the norm or spec fields from OptifineReflector

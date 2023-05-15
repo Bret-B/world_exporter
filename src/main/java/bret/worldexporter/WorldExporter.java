@@ -100,6 +100,7 @@ public class WorldExporter {
         System.gc();
     }
 
+    // TODO: add to README documentation
     private static void keepRadius(String msg, ClientWorld world, ClientPlayerEntity player) {
         try {
             int newRadius = Integer.parseInt(msg.substring(CMD_RADIUS.length()).trim());

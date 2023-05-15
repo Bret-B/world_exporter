@@ -151,6 +151,7 @@ public class Quad {
         return type;
     }
 
+    // normal range is [0, 15] from lowest-highest brightness
     public int getLightValue() {
         return lightValue;
     }

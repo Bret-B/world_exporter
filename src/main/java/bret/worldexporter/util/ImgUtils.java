@@ -6,6 +6,7 @@ import java.awt.image.BufferedImage;
 import java.awt.image.IndexColorModel;
 import java.awt.image.PixelGrabber;
 import java.awt.image.RescaleOp;
+import java.util.Arrays;
 
 public class ImgUtils {
     @Nullable
@@ -48,7 +49,8 @@ public class ImgUtils {
         // should the transparency value be overwritten, or merged in some way?
         for (int i = 0; i < imagePixels.length; ++i) {
             // a factor [0-1.0] denoting how much opaqueness in the original image to keep
-            float opaquenessFactor = (transparencyPixels[i] & 0x000000FF) / 255.0f;  // the "blue" part of the color is used, but it should be grayscale anyway
+            // the "blue" part of the color is used, but it should be grayscale anyway and uniform across r,g,b
+            float opaquenessFactor = (transparencyPixels[i] & 0x000000FF) / 255.0f;
             int newAlpha = (imagePixels[i] & 0xFF000000) >>> 24;
             newAlpha = Math.max(0, Math.min(255, Math.round(newAlpha * opaquenessFactor)));
             merged[i] = (newAlpha << 24) | (imagePixels[i] & 0x00FFFFFF);
@@ -138,5 +140,32 @@ public class ImgUtils {
         PixelGrabber pixelGrabber = new PixelGrabber(image, 0, 0, width, height, pixels, 0, width);
         pixelGrabber.grabPixels();
         return pixels;
+    }
+
+    // Returns true if two images have equivalent data
+    public static boolean compareImages(BufferedImage first, BufferedImage second) {
+        if (first == second) {
+            return true;
+        }
+        if ((first == null) != (second == null)) {
+            return false;
+        }
+        if ((first.getWidth() != second.getWidth()) || (first.getHeight() != second.getHeight())) {
+            return false;
+        }
+        if (first.getColorModel() != second.getColorModel()) {
+            return false;
+        }
+
+        int[] firstData;
+        int[] secondData;
+        try {
+            firstData = getPixelData(first);
+            secondData = getPixelData(second);
+        } catch (InterruptedException e) {
+            return false;
+        }
+
+        return Arrays.equals(firstData, secondData);
     }
 }

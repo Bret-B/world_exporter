@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 public class ObjExporter extends Exporter {
-    private final static String TEXTURE_DIR = "t";
+    private final static String TEXTURE_DIR = "tex";
     private final File baseDir = new File(Minecraft.getInstance().gameDirectory, "worldexporter/worlddump" + java.time.LocalDateTime.now().toString().replace(':', '-'));
     private final File texturePath = new File(baseDir, TEXTURE_DIR);
     // geometric vertices cache (tag v) for the .obj output which maps the vertex to its number in the file
@@ -39,6 +39,9 @@ public class ObjExporter extends Exporter {
     private int modelCount = 0;
     private int vertCount = 0;
     private int uvCount = 0;
+    // TODO: add options for these
+    private final static boolean squareEmissivity = false;
+    private final static boolean forceEnableResourceEmissivity = true;
 
     public ObjExporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize, int threads) {
         super(player, radius, lower, upper, optimizeMesh, randomize, threads);
@@ -92,7 +95,8 @@ public class ObjExporter extends Exporter {
                 modelIdToLocation.put(modelId, quadResource);
                 String modelName = quadResource.toString().replaceAll("[^a-zA-Z0-9.-]", "-") + '_' + modelId;
 
-                File fullTextureFilename = new File(texturePath, modelName + ".png");
+                String baseTextureName = modelName + ".png";
+                File fullTextureFilename = new File(texturePath, baseTextureName);
                 writeTextureOnThread(fullTextureFilename, image);
 
                 // write material information to .mtl file
@@ -104,11 +108,22 @@ public class ObjExporter extends Exporter {
                 Runnable emissiveFallback = () -> {
                     if (quad.getLightValue() != 0) {
                         String subpath = modelName + "_e.png";
-                        int color = ((quad.getLightValue() * 17) << 24) | 0x00FFFFFF;  // alpha value to "dim" the image by
+                        String emissiveTextureName = TEXTURE_DIR + '/' + subpath;
+                        int color = Math.max(0, Math.min(255, quad.getLightValue() * 17));
+                        color = squareEmissivity ? (color * color) / 255 : color;
+                        color = (color << 24) | 0x00FFFFFF;  // alpha value to "dim" the image by
                         BufferedImage emissive = ImgUtils.tintImage(image, color);
+                        // If the emissive image is equal to the base image, don't write a duplicate texture
+                        // This is disabled because it breaks Blender's OBJ importer
+//                        if (ImgUtils.compareImages(image, emissive)) {
+//                            emissiveTextureName = baseTextureName;  // modelName + ".png"
+//                        } else {
+//                            writeTextureOnThread(new File(texturePath, subpath), emissive);
+//                        }
                         writeTextureOnThread(new File(texturePath, subpath), emissive);
                         try {
-                            mtlWriter.write("map_Ke " + TEXTURE_DIR + '/' + subpath + '\n');
+                            mtlWriter.write("map_Ke " + emissiveTextureName + '\n');
+                            modelToEmissiveMap.put(model, emissiveTextureName);
                         } catch (IOException ignored) {
                         }
                     }
@@ -117,7 +132,8 @@ public class ObjExporter extends Exporter {
                 if (OptifineReflector.validOptifine) {
                     NormalData nd = null;
                     if (!resourceToNormalMap.containsKey(quadResource) || !resourceToHeightMap.containsKey(quadResource)) {
-                        nd = getNormalData(quad);
+                        // TODO: specify that normal map is exported in OpenGL format in README, or add option?
+                        nd = getNormalData(quad, true);
                     }
 
                     String normalTextureName = null;
@@ -135,20 +151,22 @@ public class ObjExporter extends Exporter {
                     if (normalTextureName != null) {
                         mtlWriter.write("map_Kn " + normalTextureName + '\n');
                         mtlWriter.write("norm " + normalTextureName + '\n');
-                        mtlWriter.write("map_bump -bm 0.5 " + normalTextureName + '\n');
+                        mtlWriter.write("map_bump -bm 1.0 " + normalTextureName + '\n');
                     }
 
-                    // I don't know of any OBJ importers that support heightmaps, but write it anyway: someone might use it
-                    String heightTextureName = null;
-                    if (!resourceToHeightMap.containsKey(quadResource) && nd != null) {
-                        BufferedImage height = LABPBRParser.getHeightmapImage(nd.height, nd.cols_width);
-                        if (LABPBRParser.hasHeight(height)) {
-                            String subpath = modelName + "_h.png";
-                            heightTextureName = TEXTURE_DIR + '/' + subpath;
-                            resourceToHeightMap.put(quadResource, heightTextureName);
-                            writeTextureOnThread(new File(texturePath, subpath), height);
-                        }
-                    }
+                    // TODO: add option to export heightmap image
+                    // I don't know of any OBJ importers that support heightmaps, but write it anyway if enabled
+                    // I could add support for adding the heightmap as displacement in the Blender script eventually
+//                    String heightTextureName = null;
+//                    if (!resourceToHeightMap.containsKey(quadResource) && nd != null) {
+//                        BufferedImage height = LABPBRParser.getHeightmapImage(nd.height, nd.cols_width);
+//                        if (LABPBRParser.hasHeight(height)) {
+//                            String subpath = modelName + "_h.png";
+//                            heightTextureName = TEXTURE_DIR + '/' + subpath;
+//                            resourceToHeightMap.put(quadResource, heightTextureName);
+//                            writeTextureOnThread(new File(texturePath, subpath), height);
+//                        }
+//                    }
 //                    else {
 //                        heightTextureName = resourceToHeightMap.getOrDefault(quadResource, null);
 //                    }
@@ -193,22 +211,33 @@ public class ObjExporter extends Exporter {
                         mtlWriter.write("map_Pr " + roughnessTextureName + '\n');
                     }
 
-                    String emissiveTextureName = null;
-                    if (!modelToEmissiveMap.containsKey(model) && sd != null) {
-                        BufferedImage emissive = LABPBRParser.getEmissiveImage(sd.emissiveness, sd.cols_width);
+                    // Can this be made more accurate? How?
+                    // Currently, if specular map has no meaningful data whatsoever -> use fallback
+                    String emissiveTextureName;
+                    if (modelToEmissiveMap.containsKey(model)) {
+                        emissiveTextureName = modelToEmissiveMap.get(model);
+                        mtlWriter.write("map_Ke " + emissiveTextureName + '\n');
+                    } else if (sd != null) {
+                        BufferedImage emissive = LABPBRParser.getEmissiveImage(sd.emissiveness, sd.cols_width, squareEmissivity);
                         if (LABPBRParser.hasEmissive(emissive)) {
                             String subpath = modelName + "_e.png";
                             emissiveTextureName = TEXTURE_DIR + '/' + subpath;
                             BufferedImage newEmissive = ImgUtils.mergeTransparency(image, emissive);
+                            // If the emissive image is equal to the base image, don't write a duplicate texture
+                            // This is disabled because it breaks Blender's OBJ importer
+//                            if (ImgUtils.compareImages(image, newEmissive)) {
+//                                emissiveTextureName = baseTextureName;  // modelName + ".png"
+//                            } else {
+//                                writeTextureOnThread(new File(texturePath, subpath), newEmissive);
+//                            }
                             writeTextureOnThread(new File(texturePath, subpath), newEmissive);
-                        } else {
+                            mtlWriter.write("map_Ke " + emissiveTextureName + '\n');
+                            modelToEmissiveMap.put(model, emissiveTextureName);
+                        } else if (!forceEnableResourceEmissivity) {
                             emissiveFallback.run();
                         }
                     } else {
-                        emissiveTextureName = modelToEmissiveMap.getOrDefault(model, null);
-                    }
-                    if (emissiveTextureName != null) {
-                        mtlWriter.write("map_Ke " + emissiveTextureName + '\n');
+                        emissiveFallback.run();
                     }
                 } else {
                     emissiveFallback.run();
@@ -282,7 +311,7 @@ public class ObjExporter extends Exporter {
             Files.createDirectories(new File(fullRelativeDirectory).toPath());
             ImageIO.write(image, "png", outputFile);
         } catch (IOException e) {
-            LOGGER.debug("Could not save resource texture: " + outputFile);
+            LOGGER.error("Could not save resource texture: " + outputFile);
         }
     }
 
