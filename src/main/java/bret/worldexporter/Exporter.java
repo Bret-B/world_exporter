@@ -8,9 +8,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.client.renderer.Atlases;
 import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.renderer.texture.AtlasTexture;
-import net.minecraft.client.renderer.texture.Texture;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.renderer.texture.*;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.client.renderer.vertex.VertexFormat;
 import net.minecraft.client.settings.AmbientOcclusionStatus;
@@ -31,10 +29,7 @@ import java.awt.image.RasterFormatException;
 import java.lang.reflect.Field;
 import java.nio.IntBuffer;
 import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.function.Consumer;
 
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
@@ -99,17 +94,36 @@ public class Exporter {
         return (glTextureId == 0 || glTextureId == -1);
     }
 
-    public static int getGlTextureId(ResourceLocation resource) {
-        Texture texture = Minecraft.getInstance().getTextureManager().getTexture(resource);
+    public int getGlTextureId(ResourceLocation resource, boolean threaded) {
+        Texture texture = getTexture(resource, threaded);
         if (texture == null) return -1;
         return texture.getId();
     }
 
-    // only ResourceLocations with an associated Texture should be used
-    // may only be called on the main thread due to the GL11 calls
-    @Nullable
-    public static BufferedImage computeImage(ResourceLocation resource) {
-        return computeImage(getGlTextureId(resource));
+    // fetch the Texture for a ResourceLocation from Minecraft's TextureManager, or try to load it if needed
+    public Texture getTexture(ResourceLocation resource, boolean threaded) {
+        TextureManager textureManager = Minecraft.getInstance().getTextureManager();
+        Texture texture = textureManager.getTexture(resource);
+        if (texture == null) {
+            // texture is not currently loaded. This can be caused by entities outside render distance
+            // attempt to load the texture into the texture manager (see TextureManager._bind() and register())
+            Texture newTexture = new SimpleTexture(resource);
+            if (threaded) {
+                try {
+                    RunnableFuture<Boolean> task = new FutureTask<>(() -> {
+                        textureManager.register(resource, newTexture);
+                        return true;
+                    });
+                    addTask(task);
+                    task.get();
+                } catch (InterruptedException | ExecutionException ignored) {
+                }
+            } else {
+                textureManager.register(resource, newTexture);
+            }
+            texture = textureManager.getTexture(resource);
+        }
+        return texture;
     }
 
     // may only be called on the main thread due to the GL11 calls
@@ -195,7 +209,7 @@ public class Exporter {
     }
 
     // this function MUST be run on the main thread
-    public void exportQuads(Consumer<ArrayList<Quad>> quadConsumer) throws InterruptedException {
+    public void exportQuads(Consumer<ArrayList<ExportChunk>> chunkConsumer) throws InterruptedException {
         boolean threaded = threads != 1;
         List<Pair<BlockPos, BlockPos>> allChunks = getMultipleChunkPos(Integer.MAX_VALUE);
         ArrayList<Runnable> tasks = new ArrayList<>();
@@ -210,7 +224,7 @@ public class Exporter {
         if (chunkPartitions.size() > threads) throw new RuntimeException("chunkPartition size mismatch");
 
         for (List<Pair<BlockPos, BlockPos>> chunkPartition : chunkPartitions) {
-            tasks.add(new ExporterRunnable(this, chunkPartition, threaded, quadConsumer, CHUNKS_PER_CONSUME));
+            tasks.add(new ExporterRunnable(this, chunkPartition, threaded, chunkConsumer, CHUNKS_PER_CONSUME));
         }
 
         if (threads == 1) {
@@ -294,11 +308,13 @@ public class Exporter {
         return chunks;
     }
 
+    // may only be called on the main thread
     public synchronized BufferedImage getAtlasImage(ResourceLocation resource) {
-        int glTextureId = getGlTextureId(resource);
+        int glTextureId = getGlTextureId(resource, false);
         return getAtlasImage(glTextureId);
     }
 
+    // may only be called on the main thread
     public synchronized BufferedImage getAtlasImage(int glTextureId) {
         if (invalidGlId(glTextureId)) return null;
         return atlasCacheMap.computeIfAbsent(glTextureId, Exporter::computeImage);
@@ -306,8 +322,8 @@ public class Exporter {
 
     // returns null if the provided ResourceLocation does not refer to an AtlasTexture
     // could check if this is equivalent to MissingTextureSprite if this is ever a problem
-    protected Pair<ResourceLocation, TextureAtlasSprite> getTextureFromAtlas(ResourceLocation resource, UVBounds uvBounds) {
-        Texture texture = mc.textureManager.getTexture(resource);
+    protected Pair<ResourceLocation, TextureAtlasSprite> getTextureFromAtlas(ResourceLocation resource, UVBounds uvBounds, boolean threaded) {
+        Texture texture = getTexture(resource, threaded);
         if (!(texture instanceof AtlasTexture)) return null;
         AtlasTexture atlasTexture = (AtlasTexture) texture;
 
@@ -331,6 +347,7 @@ public class Exporter {
         }
     }
 
+    // may only be called on the main thread
     @Nullable
     protected BufferedImage getImage(Quad quad) {
         BufferedImage image;

@@ -81,7 +81,7 @@ public class WorldExporter {
         ObjExporter objExporter = new ObjExporter(player, radius, lower, upper, optimizeMesh, randomizeTextureOrientation, threads);
         boolean success;
         try {
-            success = objExporter.export("world.obj", "world.mtl");
+            success = objExporter.export("world", "world_materials");
         } catch (OutOfMemoryError e) {
             player.sendMessage(new StringTextComponent("Ran out of memory while exporting. " +
                             "Allocate more memory to Minecraft and try again."),

@@ -22,6 +22,10 @@ import java.util.function.Consumer;
 
 public class ObjExporter extends Exporter {
     private final static String TEXTURE_DIR = "tex";
+    // TODO: add options for these
+    private final static ChunkExportType chunkExportType = ChunkExportType.SINGLE_FILE_SINGLE_OBJECT;
+    private final static boolean squareEmissivity = false;
+    private final static boolean forceEnableResourceEmissivity = true;
     private final File baseDir = new File(Minecraft.getInstance().gameDirectory, "worldexporter/worlddump" + java.time.LocalDateTime.now().toString().replace(':', '-'));
     private final File texturePath = new File(baseDir, TEXTURE_DIR);
     // geometric vertices cache (tag v) for the .obj output which maps the vertex to its number in the file
@@ -36,47 +40,96 @@ public class ObjExporter extends Exporter {
     private final Map<ResourceLocation, String> resourceToRoughnessMap = new HashMap<>();
     private final Map<Triple<ResourceLocation, Integer, Integer>, String> modelToEmissiveMap = new HashMap<>();
     private final Map<Integer, ResourceLocation> modelIdToLocation = new HashMap<>();
+    private BufferedWriter lastObjWriter = null;
     private int modelCount = 0;
     private int vertCount = 0;
     private int uvCount = 0;
-    // TODO: add options for these
-    private final static boolean squareEmissivity = false;
-    private final static boolean forceEnableResourceEmissivity = true;
 
     public ObjExporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize, int threads) {
         super(player, radius, lower, upper, optimizeMesh, randomize, threads);
     }
 
-    public boolean export(String objFilenameIn, String mtlFilenameIn) throws IOException {
+    public boolean export(String objBaseFilename, String mtlBaseFilename) throws IOException {
         setup();
         Files.createDirectories(texturePath.toPath());
-        File objFile = new File(baseDir, objFilenameIn);
-        File mtlFile = new File(baseDir, mtlFilenameIn);
+        String fullMtlFilename = mtlBaseFilename + ".mtl";
+        File mtlFile = new File(baseDir, fullMtlFilename);
         boolean success = true;
 
-        try (FileWriter objWriter = new FileWriter(objFile.getPath()); BufferedWriter objBWriter = new BufferedWriter(objWriter, 32 * (1 << 20));  // 32 MB buffer
-             FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlBWriter = new BufferedWriter(mtlWriter, 1 << 10)) {  // 1 KB buffer
-            objBWriter.write("mtllib " + mtlFilenameIn + "\n\n");
-            Consumer<ArrayList<Quad>> quadConsumer = (quads) -> {
-                try {
-                    writeQuads(quads, objBWriter, mtlBWriter);
-                } catch (Exception e) {
-                    LOGGER.error("Unable to write quads to the obj/mtl file: ", e);
-                    throw new RuntimeException(e);
+        try (FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlBWriter = new BufferedWriter(mtlWriter, 8 << 20)) {  // 8 MB buffer
+            Consumer<ArrayList<ExportChunk>> chunkConsumer = (exportChunks) -> {
+                for (ExportChunk exportChunk : exportChunks) {
+                    try {
+                        BufferedWriter objWriter = getObjWriter(objBaseFilename, fullMtlFilename, exportChunk);
+                        writeChunk(exportChunk, objWriter, mtlBWriter);
+                    } catch (Exception e) {
+                        LOGGER.error("Unable to write chunk to the obj/mtl file: ", e);
+                        throw new RuntimeException(e);
+                    }
                 }
             };
-            exportQuads(quadConsumer);
+            exportQuads(chunkConsumer);
         } catch (IOException | InterruptedException e) {
             success = false;
+        } finally {
+            if (lastObjWriter != null) {
+                lastObjWriter.close();
+            }
         }
 
         finish();
         return success;
     }
 
-    private synchronized void writeQuads(ArrayList<Quad> quads, Writer objWriter, Writer mtlWriter) throws IOException {
+    private synchronized BufferedWriter getObjWriter(String objBaseName, String fullMtlFilename, ExportChunk chunk) throws IOException {
+        BufferedWriter writer;
+        switch (chunkExportType) {
+            case SINGLE_FILE_SINGLE_OBJECT:
+                writer = getBufferedWriter(objBaseName + ".obj", fullMtlFilename);
+                break;
+            case SINGLE_FILE_MULTIPLE_OBJECTS:
+                writer = getBufferedWriter(objBaseName + ".obj", fullMtlFilename);
+                // define a new object for the chunk in the single obj file
+                writer.write("o " + "chunk_" + chunk.xChunkPos + '_' + chunk.zChunkPos + '\n');
+                break;
+            case MULTIPLE_FILES:
+                if (lastObjWriter != null) {
+                    lastObjWriter.close();
+                }
+                File objFile = new File(baseDir, objBaseName + "_chunk_" + chunk.xChunkPos + '_' + chunk.zChunkPos + ".obj");
+                writer = new BufferedWriter(new FileWriter(objFile.getPath()), 4 << 20);  // 4 MB buffer since chunks are usually small
+                writer.write("mtllib " + fullMtlFilename + "\n\n");
+
+                // reset vertex and uv counts and their cached values since we are now using a new obj file
+                vertCount = 0;
+                uvCount = 0;
+                verticesCache.clear();
+                uvCache.clear();
+                break;
+            default:
+                throw new IllegalStateException("Unexpected value: " + chunkExportType);
+        }
+
+        lastObjWriter = writer;
+        return writer;
+    }
+
+    private BufferedWriter getBufferedWriter(String objFullFilename, String mtlFullFilename) throws IOException {
+        BufferedWriter writer;
+        if (lastObjWriter == null) {
+            File objFile = new File(baseDir, objFullFilename);
+            writer = new BufferedWriter(new FileWriter(objFile.getPath()), 32 << 20);  // 32 MB buffer
+            writer.write("mtllib " + mtlFullFilename + "\n\n");
+        } else {
+            writer = lastObjWriter;
+        }
+        lastObjWriter = writer;
+        return writer;
+    }
+
+    private synchronized void writeChunk(ExportChunk exportChunk, Writer objWriter, Writer mtlWriter) throws IOException {
         Map<Integer, ArrayList<Quad>> quadsForModel = new HashMap<>();
-        for (Quad quad : quads) {
+        for (Quad quad : exportChunk.quads) {
             Triple<ResourceLocation, Integer, Integer> model = Triple.of(quad.getResource(), quad.getColor(), quad.getLightValue());
 
             int modelId;
@@ -317,5 +370,11 @@ public class ObjExporter extends Exporter {
 
     private void writeTextureOnThread(File outputFile, BufferedImage image) {
         addThreadTask(() -> writeTexture(outputFile, image));
+    }
+
+    public enum ChunkExportType {
+        SINGLE_FILE_SINGLE_OBJECT,
+        SINGLE_FILE_MULTIPLE_OBJECTS,
+        MULTIPLE_FILES,
     }
 }

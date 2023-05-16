@@ -49,9 +49,9 @@ class ExporterRunnable implements Runnable {
     private final boolean threaded;
     private final Exporter exporter;
     private final int chunksPerConsume;
-    private final Consumer<ArrayList<Quad>> quadConsumer;
+    private final Consumer<ArrayList<ExportChunk>> chunkConsumer;
+    private ArrayList<ExportChunk> resultChunks = new ArrayList<>();
     private BlockPos lastFixedBlock;
-    private volatile ArrayList<Quad> resultQuads = new ArrayList<>();
     private UUID lastFixedEntityUUID;
     private boolean lastFixedIsBlock;
     private BlockPos lastFallbackBlock;
@@ -59,17 +59,13 @@ class ExporterRunnable implements Runnable {
     private boolean lastFallbackIsBlock;
 
     public ExporterRunnable(Exporter exporter, Collection<Pair<BlockPos, BlockPos>> chunkBoundaries,
-                            boolean threaded, Consumer<ArrayList<Quad>> quadConsumer, int chunksPerConsume) {
+                            boolean threaded, Consumer<ArrayList<ExportChunk>> chunkConsumer, int chunksPerConsume) {
         this.exporter = exporter;
         this.chunkBoundaries = chunkBoundaries;
         this.threaded = threaded;
-        this.quadConsumer = quadConsumer;
+        this.chunkConsumer = chunkConsumer;
         this.chunksPerConsume = chunksPerConsume;
         impl = new CustomImpl(exporter, this);
-    }
-
-    public ArrayList<Quad> getQuads() {
-        return resultQuads;
     }
 
     @Override
@@ -77,31 +73,35 @@ class ExporterRunnable implements Runnable {
         try {
             int processedChunks = 0;
             for (Pair<BlockPos, BlockPos> startEnd : chunkBoundaries) {
-                resultQuads.addAll(getNextChunkData(startEnd.getLeft(), startEnd.getRight()));
-                ++processedChunks;
-                if (processedChunks == chunksPerConsume) {
+                ArrayList<Quad> chunkQuads = getNextChunkData(startEnd.getLeft(), startEnd.getRight());
+                int chunkX = startEnd.getLeft().getX() >> 4;
+                int chunkZ = startEnd.getLeft().getZ() >> 4;
+                this.resultChunks.add(new ExportChunk(chunkQuads, chunkX, chunkZ));
+                if (++processedChunks == chunksPerConsume) {
                     processedChunks = 0;
-                    consumeQuads();
+                    consumeChunks();
                 }
             }
 
-            consumeQuads();
+            if (processedChunks > 0) {
+                consumeChunks();
+            }
         } catch (Throwable e) {
             LOGGER.error("ExporterRunnable crashed while exporting: ", e);
         }
     }
 
-    private void consumeQuads() {
-        ArrayList<Quad> toConsume = resultQuads;
-        resultQuads = new ArrayList<>();
+    private void consumeChunks() {
+        ArrayList<ExportChunk> toConsume = resultChunks;
+        resultChunks = new ArrayList<>();
         try {
             if (threaded) {
-                exporter.addTask(() -> quadConsumer.accept(toConsume));
+                exporter.addTask(() -> chunkConsumer.accept(toConsume));
             } else {
-                quadConsumer.accept(toConsume);
+                chunkConsumer.accept(toConsume);
             }
         } catch (Exception e) {
-            LOGGER.warn("Unable to handle list of Quads in ExporterRunnable: " + e);
+            LOGGER.warn("Unable to handle list of ExportChunks in ExporterRunnable: ", e);
         }
     }
 
@@ -145,7 +145,8 @@ class ExporterRunnable implements Runnable {
                         } catch (Exception e) {
                             try {
                                 exporter.addTask(renderTileEntity);
-                                if (!renderTileEntity.get()) throw new RuntimeException("Unknown error while exporting tile entity on main thread.");
+                                if (!renderTileEntity.get())
+                                    throw new RuntimeException("Unknown error while exporting tile entity on main thread.");
                             } catch (Exception e2) {
                                 LOGGER.error("Unable to export tile entity: " + tileentity + "\nDue to multiple exceptions: ", e);
                                 LOGGER.error(e2);
@@ -185,6 +186,7 @@ class ExporterRunnable implements Runnable {
             postCountLayerVertices();
         }
 
+        // TODO: option for enabling/disabling entities, also option for LivingEntity
         // export all entities within chunk
         for (Entity entity : exporter.world.getEntities(null, new AxisAlignedBB(start, end))) {
             preEntity(entity.getUUID());
@@ -205,7 +207,8 @@ class ExporterRunnable implements Runnable {
             } catch (Exception e) {
                 try {
                     exporter.addTask(renderEntity);
-                    if (!renderEntity.get()) throw new RuntimeException("Unknown error while exporting entity on main thread.");
+                    if (!renderEntity.get())
+                        throw new RuntimeException("Unknown error while exporting entity on main thread.");
                 } catch (Exception e2) {
                     LOGGER.error("Unable to export entity: " + entity + "\nDue to multiple exceptions: ", e);
                     LOGGER.error(e2);
@@ -446,14 +449,14 @@ class ExporterRunnable implements Runnable {
         List<Quad> quads = blockQuadsMap.values().stream().flatMap(Collection::stream).collect(Collectors.toList());
         quads.addAll(entityUUIDQuadsMap.values().stream().flatMap(Collection::stream).collect(Collectors.toList()));
         for (Quad quad : quads) {
-            Texture baseTexture = exporter.mc.textureManager.getTexture(quad.getResource());
+            Texture baseTexture = exporter.getTexture(quad.getResource(), threaded);
             quad.setTexture(baseTexture);
             boolean didModifyUV = false;
             // allowed error is very small by default
             float allowableErrorU = 0.00001f;
             float allowableErrorV = 0.00001f;
             if (baseTexture instanceof AtlasTexture) {
-                Pair<ResourceLocation, TextureAtlasSprite> nameAndTexture = exporter.getTextureFromAtlas(quad.getResource(), quad.getUvBounds());
+                Pair<ResourceLocation, TextureAtlasSprite> nameAndTexture = exporter.getTextureFromAtlas(quad.getResource(), quad.getUvBounds(), threaded);
                 if (nameAndTexture != null) {
                     quad.setResource(nameAndTexture.getLeft());
                     TextureAtlasSprite sprite = nameAndTexture.getRight();
