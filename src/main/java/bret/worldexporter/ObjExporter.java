@@ -1,5 +1,6 @@
 package bret.worldexporter;
 
+import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
 import bret.worldexporter.util.ImgUtils;
@@ -22,10 +23,6 @@ import java.util.function.Consumer;
 
 public class ObjExporter extends Exporter {
     private final static String TEXTURE_DIR = "tex";
-    // TODO: add options for these
-    private final static ChunkExportType chunkExportType = ChunkExportType.SINGLE_FILE_SINGLE_OBJECT;
-    private final static boolean squareEmissivity = false;
-    private final static boolean forceEnableResourceEmissivity = true;
     private final File baseDir = new File(Minecraft.getInstance().gameDirectory, "worldexporter/worlddump" + java.time.LocalDateTime.now().toString().replace(':', '-'));
     private final File texturePath = new File(baseDir, TEXTURE_DIR);
     // geometric vertices cache (tag v) for the .obj output which maps the vertex to its number in the file
@@ -36,6 +33,7 @@ public class ObjExporter extends Exporter {
     private final Map<Triple<ResourceLocation, Integer, Integer>, Integer> modelToIdMap = new HashMap<>();
     private final Map<ResourceLocation, String> resourceToNormalMap = new HashMap<>();
     private final Map<ResourceLocation, String> resourceToHeightMap = new HashMap<>();
+    private final Map<ResourceLocation, String> resourceToAOMap = new HashMap<>();
     private final Map<ResourceLocation, String> resourceToMetalMap = new HashMap<>();
     private final Map<ResourceLocation, String> resourceToRoughnessMap = new HashMap<>();
     private final Map<Triple<ResourceLocation, Integer, Integer>, String> modelToEmissiveMap = new HashMap<>();
@@ -83,7 +81,7 @@ public class ObjExporter extends Exporter {
 
     private synchronized BufferedWriter getObjWriter(String objBaseName, String fullMtlFilename, ExportChunk chunk) throws IOException {
         BufferedWriter writer;
-        switch (chunkExportType) {
+        switch (WorldExporterConfig.CLIENT.chunkExportType.get()) {
             case SINGLE_FILE_SINGLE_OBJECT:
                 writer = getBufferedWriter(objBaseName + ".obj", fullMtlFilename);
                 break;
@@ -107,7 +105,7 @@ public class ObjExporter extends Exporter {
                 uvCache.clear();
                 break;
             default:
-                throw new IllegalStateException("Unexpected value: " + chunkExportType);
+                throw new IllegalStateException("Unexpected value for chunkExportType enum");
         }
 
         lastObjWriter = writer;
@@ -129,6 +127,8 @@ public class ObjExporter extends Exporter {
 
     private synchronized void writeChunk(ExportChunk exportChunk, Writer objWriter, Writer mtlWriter) throws IOException {
         Map<Integer, ArrayList<Quad>> quadsForModel = new HashMap<>();
+        boolean exportHeightmap = WorldExporterConfig.CLIENT.outputHeightmap.get();
+        boolean exportAOMap = WorldExporterConfig.CLIENT.outputAmbientocclusionMap.get();
         for (Quad quad : exportChunk.quads) {
             Triple<ResourceLocation, Integer, Integer> model = Triple.of(quad.getResource(), quad.getColor(), quad.getLightValue());
 
@@ -163,7 +163,7 @@ public class ObjExporter extends Exporter {
                         String subpath = modelName + "_e.png";
                         String emissiveTextureName = TEXTURE_DIR + '/' + subpath;
                         int color = Math.max(0, Math.min(255, quad.getLightValue() * 17));
-                        color = squareEmissivity ? (color * color) / 255 : color;
+                        color = WorldExporterConfig.CLIENT.squareEmissivity.get() ? (color * color) / 255 : color;
                         color = (color << 24) | 0x00FFFFFF;  // alpha value to "dim" the image by
                         BufferedImage emissive = ImgUtils.tintImage(image, color);
                         // If the emissive image is equal to the base image, don't write a duplicate texture
@@ -184,9 +184,11 @@ public class ObjExporter extends Exporter {
 
                 if (OptifineReflector.validOptifine) {
                     NormalData nd = null;
-                    if (!resourceToNormalMap.containsKey(quadResource) || !resourceToHeightMap.containsKey(quadResource)) {
-                        // TODO: specify that normal map is exported in OpenGL format in README, or add option?
-                        nd = getNormalData(quad, true);
+                    if (!resourceToNormalMap.containsKey(quadResource)
+                            || (!resourceToHeightMap.containsKey(quadResource) && exportHeightmap)
+                            || (!resourceToAOMap.containsKey(quadResource) && WorldExporterConfig.CLIENT.outputAmbientocclusionMap.get())) {
+                        boolean useOpenGL = WorldExporterConfig.CLIENT.normalFormat.get() == WorldExporterConfig.NormalFormat.OPENGL;
+                        nd = getNormalData(quad, useOpenGL);
                     }
 
                     String normalTextureName = null;
@@ -204,32 +206,35 @@ public class ObjExporter extends Exporter {
                     if (normalTextureName != null) {
                         mtlWriter.write("map_Kn " + normalTextureName + '\n');
                         mtlWriter.write("norm " + normalTextureName + '\n');
-                        mtlWriter.write("map_bump -bm 1.0 " + normalTextureName + '\n');
+                        double bumpStrength = WorldExporterConfig.CLIENT.normalStrength.get();
+                        mtlWriter.write("map_bump -bm " + bumpStrength + ' ' + normalTextureName + '\n');
                     }
 
-                    // TODO: add option to export heightmap image
                     // I don't know of any OBJ importers that support heightmaps, but write it anyway if enabled
-                    // I could add support for adding the heightmap as displacement in the Blender script eventually
-//                    String heightTextureName = null;
-//                    if (!resourceToHeightMap.containsKey(quadResource) && nd != null) {
-//                        BufferedImage height = LABPBRParser.getHeightmapImage(nd.height, nd.cols_width);
-//                        if (LABPBRParser.hasHeight(height)) {
-//                            String subpath = modelName + "_h.png";
-//                            heightTextureName = TEXTURE_DIR + '/' + subpath;
-//                            resourceToHeightMap.put(quadResource, heightTextureName);
-//                            writeTextureOnThread(new File(texturePath, subpath), height);
-//                        }
-//                    }
-//                    else {
-//                        heightTextureName = resourceToHeightMap.getOrDefault(quadResource, null);
-//                    }
-//                    if (heightTextureName != null) {}
+                    // Support for adding the heightmap as displacement in the Blender script could be done, same for AO
+                    if (exportHeightmap && !resourceToHeightMap.containsKey(quadResource) && nd != null) {
+                        BufferedImage height = LABPBRParser.getHeightmapImage(nd.height, nd.cols_width);
+                        if (LABPBRParser.hasHeight(height)) {
+                            String subpath = modelName + "_h.png";
+                            resourceToHeightMap.put(quadResource, TEXTURE_DIR + '/' + subpath);
+                            writeTextureOnThread(new File(texturePath, subpath), height);
+                        }
+                    }
+
+                    if (exportAOMap && !resourceToAOMap.containsKey(quadResource) && nd != null) {
+                        BufferedImage ambientOcclusion = LABPBRParser.getAOImage(nd.ao, nd.cols_width);
+                        if (LABPBRParser.hasAO(ambientOcclusion)) {
+                            String subpath = modelName + "_ao.png";
+                            resourceToAOMap.put(quadResource, TEXTURE_DIR + '/' + subpath);
+                            writeTextureOnThread(new File(texturePath, subpath), ambientOcclusion);
+                        }
+                    }
 
                     SpecularData sd = null;
                     if (!resourceToMetalMap.containsKey(quadResource)
                             || !resourceToRoughnessMap.containsKey(quadResource)
                             || !modelToEmissiveMap.containsKey(model)) {
-                        sd = getSpecularData(quad);
+                        sd = getSpecularData(quad, WorldExporterConfig.CLIENT.perceptualRoughness.get());
                     }
 
                     String metalTextureName = null;
@@ -271,11 +276,16 @@ public class ObjExporter extends Exporter {
                         emissiveTextureName = modelToEmissiveMap.get(model);
                         mtlWriter.write("map_Ke " + emissiveTextureName + '\n');
                     } else if (sd != null) {
-                        BufferedImage emissive = LABPBRParser.getEmissiveImage(sd.emissiveness, sd.cols_width, squareEmissivity);
-                        if (LABPBRParser.hasEmissive(emissive)) {
+                        if (LABPBRParser.hasEmissive(sd.emissiveness)) {
+                            if (WorldExporterConfig.CLIENT.squareEmissivity.get()) {
+                                for (int i = 0; i < sd.emissiveness.length; ++i) {
+                                    sd.emissiveness[i] *= sd.emissiveness[i];
+                                }
+                            }
+
                             String subpath = modelName + "_e.png";
                             emissiveTextureName = TEXTURE_DIR + '/' + subpath;
-                            BufferedImage newEmissive = ImgUtils.mergeTransparency(image, emissive);
+                            BufferedImage newEmissive = ImgUtils.applyTransparency(image, sd.emissiveness);
                             // If the emissive image is equal to the base image, don't write a duplicate texture
                             // This is disabled because it breaks Blender's OBJ importer
 //                            if (ImgUtils.compareImages(image, newEmissive)) {
@@ -286,7 +296,7 @@ public class ObjExporter extends Exporter {
                             writeTextureOnThread(new File(texturePath, subpath), newEmissive);
                             mtlWriter.write("map_Ke " + emissiveTextureName + '\n');
                             modelToEmissiveMap.put(model, emissiveTextureName);
-                        } else if (!forceEnableResourceEmissivity) {
+                        } else if (!WorldExporterConfig.CLIENT.forceResourceEmissivity.get()) {
                             emissiveFallback.run();
                         }
                     } else {
@@ -370,11 +380,5 @@ public class ObjExporter extends Exporter {
 
     private void writeTextureOnThread(File outputFile, BufferedImage image) {
         addThreadTask(() -> writeTexture(outputFile, image));
-    }
-
-    public enum ChunkExportType {
-        SINGLE_FILE_SINGLE_OBJECT,
-        SINGLE_FILE_MULTIPLE_OBJECTS,
-        MULTIPLE_FILES,
     }
 }

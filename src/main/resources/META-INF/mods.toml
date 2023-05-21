@@ -61,11 +61,19 @@ versionRange = "[36,)" #mandatory
 ordering = "NONE"
 # Side this dependency is applied on - BOTH, CLIENT or SERVER
 side = "CLIENT"
-# Here's another dependency
+
 [[dependencies.worldexporter]]
 modId = "minecraft"
 mandatory = true
 # This version range declares a minimum of the current minecraft version up to but not including the next major version
 versionRange = "[1.16.5,1.17)"
+ordering = "NONE"
+side = "CLIENT"
+
+# optional dependency for configured
+[[dependencies.worldexporter]]
+modId = "configured"
+versionRange = "[1.0.1,)"
+mandatory = false
 ordering = "NONE"
 side = "CLIENT"

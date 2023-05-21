@@ -1,5 +1,6 @@
 package bret.worldexporter;
 
+import bret.worldexporter.config.WorldExporterConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.client.network.play.ClientPlayNetHandler;
@@ -12,6 +13,7 @@ import net.minecraftforge.client.event.ClientChatEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.world.WorldEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -31,6 +33,7 @@ public class WorldExporter {
 
     public WorldExporter() {
         MinecraftForge.EVENT_BUS.register(this);
+        WorldExporterConfig.register(ModLoadingContext.get());
     }
 
     public static int getForceChunkRadius() {

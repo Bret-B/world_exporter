@@ -10,10 +10,10 @@ public class LABPBRParser {
     private static final int METAL_LOW = 230;
     private static final int METAL_HIGH = 255;
     private static final int NO_NORMAL = (127 << 16) | (127 << 8) | 255;  // 127, 127, 255 is the default RGB for no normal
-    private static final int NO_HEIGHT = 0x00FFFFFF;
-    private static final int NO_AO = 0x00FFFFFF;
+    private static final int NO_HEIGHT = 0x000000FF;  // grayscale
+    private static final int NO_AO = 0x000000FF;  // grayscale
     private static final int NO_METAL = 0;
-    private static final int NO_ROUGHNESS = 0x00FFFFFF;
+    private static final int NO_ROUGHNESS = 0x000000FF;  // grayscale
     private static final int NO_EMISSIVE = 0;
     private static final int DEFAULT_NORMAL_PIX = 0xFF000000 | NO_NORMAL;  // packed ARGB; -8421377
     private static final int DEFAULT_SPECULAR_PIX = 0;  // packed ARGB
@@ -21,7 +21,7 @@ public class LABPBRParser {
     // https://github.com/rre36/lab-pbr/wiki/Specular-Texture-Details
     // If the entire image has no meaningful data, return null
     @Nullable
-    public static SpecularData parseSpecular(BufferedImage specularBase) {
+    public static SpecularData parseSpecular(BufferedImage specularBase, boolean perceptualRoughness) {
         int[] specular;
         try {
             specular = ImgUtils.getPixelData(specularBase);
@@ -42,9 +42,7 @@ public class LABPBRParser {
             int b = pixel & 0x000000FF;
 
             sd.emissiveness[i] = a == 255 ? NO_EMISSIVE : a / 254.0f;  // 0-254 -> 0-100% emissiveness. 255 is 0%
-            // TODO: document export texture map types in README, such as roughness being perceptual, or add option?
-//            sd.roughness[i] = (float) Math.pow(1 - (r / 255.0f), 2);  // roughness, (non-perceptual)
-            sd.roughness[i] = 1.0f - (r / 255.0f);  // perceptual roughness
+            sd.roughness[i] = perceptualRoughness ? 1.0f - (r / 255.0f) : (float) Math.pow(1 - (r / 255.0f), 2);
             // not sure how to handle the custom preset metal values
             // currently, treat metal values >= 230 as 100% metal (as done by shaders without custom metal support)
             if (isMetal(g)) {
@@ -128,7 +126,7 @@ public class LABPBRParser {
     }
 
     public static boolean hasHeight(BufferedImage image) {
-        return !allPixelsMatch(image, NO_HEIGHT, 0x00FFFFFF);
+        return !allPixelsMatch(image, NO_HEIGHT, 0x00000FF);
     }
 
     public static BufferedImage getHeightmapImage(float[] heightData, int width) {
@@ -136,7 +134,7 @@ public class LABPBRParser {
     }
 
     public static boolean hasAO(BufferedImage image) {
-        return !allPixelsMatch(image, NO_AO, 0x00FFFFFF);
+        return !allPixelsMatch(image, NO_AO, 0x000000FF);
     }
 
     public static BufferedImage getAOImage(float[] aoData, int width) {
@@ -144,7 +142,7 @@ public class LABPBRParser {
     }
 
     public static boolean hasMetal(BufferedImage image) {
-        return !allPixelsMatch(image, NO_METAL, 0x00FFFFFF);
+        return !allPixelsMatch(image, NO_METAL, 0x000000FF);
     }
 
     public static BufferedImage getMetalImage(float[] metalData, int width) {
@@ -152,15 +150,15 @@ public class LABPBRParser {
     }
 
     public static boolean hasRoughness(BufferedImage image) {
-        return !allPixelsMatch(image, NO_ROUGHNESS, 0x00FFFFFF);
+        return !allPixelsMatch(image, NO_ROUGHNESS, 0x000000FF);
     }
 
     public static BufferedImage getRoughnessImage(float[] roughnessData, int width) {
         return getGrayscaleBufferedImage(roughnessData, width);
     }
 
-    public static boolean hasEmissive(BufferedImage image) {
-        return !allPixelsMatch(image, NO_EMISSIVE, 0x00FFFFFF);
+    public static boolean hasEmissiveGrayscale(BufferedImage image) {
+        return !allPixelsMatch(image, NO_EMISSIVE, 0x000000FF);
     }
 
     public static boolean hasEmissive(float[] data) {
@@ -172,22 +170,13 @@ public class LABPBRParser {
         return false;
     }
 
-    public static BufferedImage getEmissiveImage(float[] emissiveData, int width, boolean squareData) {
-        if (squareData) {
-            for (int i = 0; i < emissiveData.length; ++i) {
-                emissiveData[i] *= emissiveData[i];
-            }
-        }
-        return getGrayscaleBufferedImage(emissiveData, width);
-    }
-
-    // input data values are effectively clamped into the range [0, 1]
+    // input data values are effectively clamped into the range [0, 1], resulting image is grayscale: TYPE_BYTE_GRAY
     private static BufferedImage getGrayscaleBufferedImage(float[] data, int width) {
-        BufferedImage image = new BufferedImage(width, data.length / width, BufferedImage.TYPE_INT_RGB);
+        BufferedImage image = new BufferedImage(width, data.length / width, BufferedImage.TYPE_BYTE_GRAY);
         int[] grayscaleData = new int[data.length];
         for (int i = 0; i < data.length; ++i) {
             int grayValue = clamp(Math.round(data[i] * 255.0f));
-            grayscaleData[i] = 0xFF000000 | (grayValue << 16) | (grayValue << 8) | grayValue;
+            grayscaleData[i] = (byte) grayValue;
         }
         image.setRGB(0, 0, width, data.length / width, grayscaleData, 0, width);
         return image;
@@ -217,11 +206,11 @@ public class LABPBRParser {
         return value >= METAL_LOW && value <= METAL_HIGH;
     }
 
-    private static int clamp(int value) {
+    public static int clamp(int value) {
         return Math.max(0, Math.min(255, value));
     }
 
-    private static float clamp(float value) {
+    public static float clamp(float value) {
         return Math.max(0.0f, Math.min(1.0f, value));
     }
 }

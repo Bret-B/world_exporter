@@ -1,5 +1,6 @@
 package bret.worldexporter;
 
+import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
 import com.mojang.blaze3d.matrix.MatrixStack;
@@ -15,6 +16,7 @@ import net.minecraft.client.renderer.tileentity.TileEntityRendererDispatcher;
 import net.minecraft.client.renderer.vertex.VertexFormat;
 import net.minecraft.client.renderer.vertex.VertexFormatElement;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.inventory.container.PlayerContainer;
 import net.minecraft.tileentity.TileEntity;
@@ -76,6 +78,12 @@ class ExporterRunnable implements Runnable {
                 ArrayList<Quad> chunkQuads = getNextChunkData(startEnd.getLeft(), startEnd.getRight());
                 int chunkX = startEnd.getLeft().getX() >> 4;
                 int chunkZ = startEnd.getLeft().getZ() >> 4;
+
+                if (WorldExporterConfig.CLIENT.relativeCoordinates.get()) {
+                    chunkX -= exporter.playerX >> 4;
+                    chunkZ -= exporter.playerZ >> 4;
+                }
+
                 this.resultChunks.add(new ExportChunk(chunkQuads, chunkX, chunkZ));
                 if (++processedChunks == chunksPerConsume) {
                     processedChunks = 0;
@@ -186,36 +194,40 @@ class ExporterRunnable implements Runnable {
             postCountLayerVertices();
         }
 
-        // TODO: option for enabling/disabling entities, also option for LivingEntity
         // export all entities within chunk
-        for (Entity entity : exporter.world.getEntities(null, new AxisAlignedBB(start, end))) {
-            preEntity(entity.getUUID());
-            matrixStack.pushPose();
-            float partialTicks = 0;
-            int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright
-            RunnableFuture<Boolean> renderEntity = new FutureTask<>(() -> {
-                exporter.mc.getEntityRenderDispatcher().render(entity, entity.getX(), entity.getY(), entity.getZ(), entity.yRot,
-                        partialTicks, matrixStack, impl, packedLight);
-                return true;
-            });
-            try {
-                // optifine can cause this to crash because it calls parts of RenderSystem which check the thread it is running on
-                // causing a crash on threads other than the render thread
-                // So far, I have seen this occur with leashed entities.
-                // If this happens, fallback to main thread
-                renderEntity.run();
-            } catch (Exception e) {
+        if (WorldExporterConfig.CLIENT.enableEntities.get()) {
+            boolean skipLiving = !WorldExporterConfig.CLIENT.enableLivingEntities.get();
+            for (Entity entity : exporter.world.getEntities(null, new AxisAlignedBB(start, end))) {
+                if (skipLiving && entity instanceof LivingEntity) continue;
+
+                preEntity(entity.getUUID());
+                matrixStack.pushPose();
+                float partialTicks = 0;
+                int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright
+                RunnableFuture<Boolean> renderEntity = new FutureTask<>(() -> {
+                    exporter.mc.getEntityRenderDispatcher().render(entity, entity.getX(), entity.getY(), entity.getZ(), entity.yRot,
+                            partialTicks, matrixStack, impl, packedLight);
+                    return true;
+                });
                 try {
-                    exporter.addTask(renderEntity);
-                    if (!renderEntity.get())
-                        throw new RuntimeException("Unknown error while exporting entity on main thread.");
-                } catch (Exception e2) {
-                    LOGGER.error("Unable to export entity: " + entity + "\nDue to multiple exceptions: ", e);
-                    LOGGER.error(e2);
+                    // optifine can cause this to crash because it calls parts of RenderSystem which check the thread it is running on
+                    // causing a crash on threads other than the render thread
+                    // So far, I have seen this occur with leashed entities.
+                    // If this happens, fallback to main thread
+                    renderEntity.run();
+                } catch (Exception e) {
+                    try {
+                        exporter.addTask(renderEntity);
+                        if (!renderEntity.get())
+                            throw new RuntimeException("Unknown error while exporting entity on main thread.");
+                    } catch (Exception e2) {
+                        LOGGER.error("Unable to export entity: " + entity + "\nDue to multiple exceptions: ", e);
+                        LOGGER.error(e2);
+                    }
                 }
+                matrixStack.popPose();
+                postCountLayerVertices();
             }
-            matrixStack.popPose();
-            postCountLayerVertices();
         }
 
         // finish all builders that were drawing, then add the data
@@ -248,7 +260,9 @@ class ExporterRunnable implements Runnable {
         }
 
         // translate quads so that the player x,z are the origin
-        exporter.translateQuads(quads);
+        if (WorldExporterConfig.CLIENT.relativeCoordinates.get()) {
+            exporter.translateQuads(quads);
+        }
 
         return quads;
     }

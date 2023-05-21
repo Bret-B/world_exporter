@@ -25,36 +25,31 @@ public class ImgUtils {
         return new RescaleOp(rgbaFactors, offsets, hints).filter(image, null);
     }
 
-    // Returns the provided image with alpha values set to that of the second image's values, per-pixel.
+    // Returns the provided image with alpha values multiplied by the [0, 1] values in transparencyData, per-pixel.
     // The first image should have format BufferedImage.TYPE_INT_ARGB;
     @Nullable
-    public static BufferedImage mergeTransparency(BufferedImage image, BufferedImage transparencyValueImage) {
+    public static BufferedImage applyTransparency(BufferedImage image, float[] transparencyData) {
         if (image.getType() != BufferedImage.TYPE_INT_ARGB) {
-            throw new RuntimeException("mergeTransparency requires the first argument to be an image of type INT_ARGB");
+            throw new RuntimeException("mergeTransparency requires the first argument to be an image of TYPE_INT_ARGB");
         }
-        if (image.getWidth() != transparencyValueImage.getWidth() || image.getHeight() != transparencyValueImage.getHeight()) {
-            throw new RuntimeException("mergeTransparency requires images with the same dimensions");
+        if (image.getWidth() * image.getHeight() != transparencyData.length) {
+            throw new RuntimeException("mergeTransparency requires pixel count of image to equal length of transparencyData");
         }
 
         int[] imagePixels;
-        int[] transparencyPixels;
         try {
             imagePixels = getPixelData(image);
-            transparencyPixels = getPixelData(transparencyValueImage);
         } catch (InterruptedException e) {
             return null;
         }
 
         int[] merged = new int[imagePixels.length];
-        // should the transparency value be overwritten, or merged in some way?
         for (int i = 0; i < imagePixels.length; ++i) {
-            // a factor [0-1.0] denoting how much opaqueness in the original image to keep
-            // the "blue" part of the color is used, but it should be grayscale anyway and uniform across r,g,b
-            float opaquenessFactor = (transparencyPixels[i] & 0x000000FF) / 255.0f;
             int newAlpha = (imagePixels[i] & 0xFF000000) >>> 24;
-            newAlpha = Math.max(0, Math.min(255, Math.round(newAlpha * opaquenessFactor)));
+            newAlpha = Math.max(0, Math.min(255, Math.round(newAlpha * transparencyData[i])));
             merged[i] = (newAlpha << 24) | (imagePixels[i] & 0x00FFFFFF);
         }
+
         BufferedImage mergedImage = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_ARGB);
         mergedImage.setRGB(0, 0, image.getWidth(), image.getHeight(), merged, 0, image.getWidth());
         return mergedImage;

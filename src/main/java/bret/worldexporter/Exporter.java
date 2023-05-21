@@ -57,6 +57,8 @@ public class Exporter {
     protected final CustomBlockRendererDispatcher blockRendererDispatcher = new CustomBlockRendererDispatcher(mc.getBlockRenderer().getBlockModelShaper(), mc.getBlockColors());
     protected final Map<Integer, BufferedImage> atlasCacheMap = new HashMap<>();
     protected final ClientWorld world = Objects.requireNonNull(mc.level);
+    protected final int playerX;
+    protected final int playerZ;
     private final Map<Pair<ResourceLocation, UVBounds>, Pair<ResourceLocation, TextureAtlasSprite>> atlasUVToSpriteCache = new HashMap<>();
     private final Map<Pair<ResourceLocation, UVBounds>, Float> uvTransparencyCache = new HashMap<>();
     private final Comparator<Quad> quadComparator = getQuadSort();
@@ -66,8 +68,6 @@ public class Exporter {
     private final int threads;
     private final int lowerHeightLimit;
     private final int upperHeightLimit;
-    private final int playerX;
-    private final int playerZ;
     private final BlockPos startPos;  // higher values
     private final BlockPos endPos;  // lower values
     private AmbientOcclusionStatus preAO = mc.options.ambientOcclusion;
@@ -92,38 +92,6 @@ public class Exporter {
 
     public static boolean invalidGlId(int glTextureId) {
         return (glTextureId == 0 || glTextureId == -1);
-    }
-
-    public int getGlTextureId(ResourceLocation resource, boolean threaded) {
-        Texture texture = getTexture(resource, threaded);
-        if (texture == null) return -1;
-        return texture.getId();
-    }
-
-    // fetch the Texture for a ResourceLocation from Minecraft's TextureManager, or try to load it if needed
-    public Texture getTexture(ResourceLocation resource, boolean threaded) {
-        TextureManager textureManager = Minecraft.getInstance().getTextureManager();
-        Texture texture = textureManager.getTexture(resource);
-        if (texture == null) {
-            // texture is not currently loaded. This can be caused by entities outside render distance
-            // attempt to load the texture into the texture manager (see TextureManager._bind() and register())
-            Texture newTexture = new SimpleTexture(resource);
-            if (threaded) {
-                try {
-                    RunnableFuture<Boolean> task = new FutureTask<>(() -> {
-                        textureManager.register(resource, newTexture);
-                        return true;
-                    });
-                    addTask(task);
-                    task.get();
-                } catch (InterruptedException | ExecutionException ignored) {
-                }
-            } else {
-                textureManager.register(resource, newTexture);
-            }
-            texture = textureManager.getTexture(resource);
-        }
-        return texture;
     }
 
     // may only be called on the main thread due to the GL11 calls
@@ -192,6 +160,38 @@ public class Exporter {
 
     public static boolean supportedVertexFormat(VertexFormat format) {
         return format.getElements().contains(DefaultVertexFormats.ELEMENT_POSITION) && format.getElements().contains(DefaultVertexFormats.ELEMENT_UV0);
+    }
+
+    public int getGlTextureId(ResourceLocation resource, boolean threaded) {
+        Texture texture = getTexture(resource, threaded);
+        if (texture == null) return -1;
+        return texture.getId();
+    }
+
+    // fetch the Texture for a ResourceLocation from Minecraft's TextureManager, or try to load it if needed
+    public Texture getTexture(ResourceLocation resource, boolean threaded) {
+        TextureManager textureManager = Minecraft.getInstance().getTextureManager();
+        Texture texture = textureManager.getTexture(resource);
+        if (texture == null) {
+            // texture is not currently loaded. This can be caused by entities outside render distance
+            // attempt to load the texture into the texture manager (see TextureManager._bind() and register())
+            Texture newTexture = new SimpleTexture(resource);
+            if (threaded) {
+                try {
+                    RunnableFuture<Boolean> task = new FutureTask<>(() -> {
+                        textureManager.register(resource, newTexture);
+                        return true;
+                    });
+                    addTask(task);
+                    task.get();
+                } catch (InterruptedException | ExecutionException ignored) {
+                }
+            } else {
+                textureManager.register(resource, newTexture);
+            }
+            texture = textureManager.getTexture(resource);
+        }
+        return texture;
     }
 
     // required to change MC options for proper export rendering
@@ -364,10 +364,10 @@ public class Exporter {
     // Gets the specular texture for a quad, if any, and separates it into separate images specified in this lab-pbr format:
     // https://github.com/rre36/lab-pbr/wiki/Specular-Texture-Details
     @Nullable
-    protected SpecularData getSpecularData(Quad quad) {
+    protected SpecularData getSpecularData(Quad quad, boolean perceptualRoughness) {
         BufferedImage specularImage = getImageForField(quad, OptifineReflector.multiTexSpec);
         if (specularImage == null) return null;
-        return LABPBRParser.parseSpecular(specularImage);
+        return LABPBRParser.parseSpecular(specularImage, perceptualRoughness);
     }
 
     // Gets the normal texture for a quad, if any, and separates it into separate images specified in this lab-pbr format:
