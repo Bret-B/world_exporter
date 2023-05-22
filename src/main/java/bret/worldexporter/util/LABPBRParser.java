@@ -170,6 +170,15 @@ public class LABPBRParser {
         return false;
     }
 
+    // returns true if all elements of data are equal
+    public static boolean isUniform(float[] data) {
+        float first = data[0];
+        for (int i = 1; i < data.length; i++) {
+            if (data[i] != first) return false;
+        }
+        return true;
+    }
+
     // input data values are effectively clamped into the range [0, 1], resulting image is grayscale: TYPE_BYTE_GRAY
     private static BufferedImage getGrayscaleBufferedImage(float[] data, int width) {
         BufferedImage image = new BufferedImage(width, data.length / width, BufferedImage.TYPE_BYTE_GRAY);

@@ -1,8 +1,6 @@
 package bret.worldexporter.mixins;
 
 import bret.worldexporter.WorldExporter;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.client.network.play.ClientPlayNetHandler;
 import net.minecraft.network.play.server.SUnloadChunkPacket;
 import net.minecraft.network.play.server.SUpdateViewDistancePacket;

@@ -47,8 +47,8 @@ public class WorldExporterConfig {
         public final BooleanValue perceptualRoughness;
         public final BooleanValue squareEmissivity;
         public final BooleanValue forceResourceEmissivity;
+        public final BooleanValue forceOutputUniformMaps;
         public final DoubleValue normalStrength;
-        // TODO: enum value for AO? Option to disable, bake into base texture, or output separately?
 
         Client(final ForgeConfigSpec.Builder builder) {
             builder.comment("Client-only settings").push("client");
@@ -107,6 +107,11 @@ public class WorldExporterConfig {
                     .comment("Square emissivity values when exporting, which can help differentiate between lower and higher emissivity values")
                     .translation("worldexporter.config.client.squareEmissivity")
                     .define("squareEmissivity", false);
+
+            forceOutputUniformMaps = builder
+                    .comment("Always export a grayscale texture image instead of a numeric value even if the image is uniform. Applies to roughness and metallic maps.")
+                    .translation("worldexporter.config.client.forceOutputUniformMaps")
+                    .define("forceOutputUniformMaps", false);
 
             builder.pop();
         }

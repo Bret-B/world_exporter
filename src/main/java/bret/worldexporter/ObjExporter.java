@@ -34,8 +34,8 @@ public class ObjExporter extends Exporter {
     private final Map<ResourceLocation, String> resourceToNormalMap = new HashMap<>();
     private final Map<ResourceLocation, String> resourceToHeightMap = new HashMap<>();
     private final Map<ResourceLocation, String> resourceToAOMap = new HashMap<>();
-    private final Map<ResourceLocation, String> resourceToMetalMap = new HashMap<>();
-    private final Map<ResourceLocation, String> resourceToRoughnessMap = new HashMap<>();
+    private final Map<ResourceLocation, String> resourceToMetalLineMap = new HashMap<>();
+    private final Map<ResourceLocation, String> resourceToRoughnessLineMap = new HashMap<>();
     private final Map<Triple<ResourceLocation, Integer, Integer>, String> modelToEmissiveMap = new HashMap<>();
     private final Map<Integer, ResourceLocation> modelIdToLocation = new HashMap<>();
     private BufferedWriter lastObjWriter = null;
@@ -231,42 +231,54 @@ public class ObjExporter extends Exporter {
                     }
 
                     SpecularData sd = null;
-                    if (!resourceToMetalMap.containsKey(quadResource)
-                            || !resourceToRoughnessMap.containsKey(quadResource)
+                    if (!resourceToMetalLineMap.containsKey(quadResource)
+                            || !resourceToRoughnessLineMap.containsKey(quadResource)
                             || !modelToEmissiveMap.containsKey(model)) {
                         sd = getSpecularData(quad, WorldExporterConfig.CLIENT.perceptualRoughness.get());
                     }
 
-                    String metalTextureName = null;
-                    if (!resourceToMetalMap.containsKey(quadResource) && sd != null) {
-                        BufferedImage metal = LABPBRParser.getMetalImage(sd.metallic, sd.cols_width);
-                        if (LABPBRParser.hasMetal(metal)) {
-                            String subpath = modelName + "_m.png";
-                            metalTextureName = TEXTURE_DIR + '/' + subpath;
-                            resourceToMetalMap.put(quadResource, metalTextureName);
-                            writeTextureOnThread(new File(texturePath, subpath), metal);
+                    String metalOutputLine = null;
+                    if (!resourceToMetalLineMap.containsKey(quadResource) && sd != null) {
+                        if (!WorldExporterConfig.CLIENT.forceOutputUniformMaps.get()
+                                && LABPBRParser.isUniform(sd.metallic)
+                                && sd.metallic[0] > 0.0f) {
+                            metalOutputLine = "Pm " + sd.metallic[0] + '\n';
+                        } else {
+                            BufferedImage metal = LABPBRParser.getMetalImage(sd.metallic, sd.cols_width);
+                            if (LABPBRParser.hasMetal(metal)) {
+                                String subpath = modelName + "_m.png";
+                                metalOutputLine = "map_Pm " + TEXTURE_DIR + '/' + subpath + '\n';
+                                resourceToMetalLineMap.put(quadResource, metalOutputLine);
+                                writeTextureOnThread(new File(texturePath, subpath), metal);
+                            }
                         }
                     } else {
-                        metalTextureName = resourceToMetalMap.getOrDefault(quadResource, null);
+                        metalOutputLine = resourceToMetalLineMap.getOrDefault(quadResource, null);
                     }
-                    if (metalTextureName != null) {
-                        mtlWriter.write("map_Pm " + metalTextureName + '\n');
+                    if (metalOutputLine != null) {
+                        mtlWriter.write(metalOutputLine);
                     }
 
-                    String roughnessTextureName = null;
-                    if (!resourceToRoughnessMap.containsKey(quadResource) && sd != null) {
-                        BufferedImage roughness = LABPBRParser.getRoughnessImage(sd.roughness, sd.cols_width);
-                        if (LABPBRParser.hasRoughness(roughness)) {
-                            String subpath = modelName + "_r.png";
-                            roughnessTextureName = TEXTURE_DIR + '/' + subpath;
-                            resourceToRoughnessMap.put(quadResource, roughnessTextureName);
-                            writeTextureOnThread(new File(texturePath, subpath), roughness);
+                    String roughnessOutputLine = null;
+                    if (!resourceToRoughnessLineMap.containsKey(quadResource) && sd != null) {
+                        if (!WorldExporterConfig.CLIENT.forceOutputUniformMaps.get()
+                                && LABPBRParser.isUniform(sd.roughness)
+                                && sd.roughness[0] > 0.0f) {
+                            roughnessOutputLine = "Pr " + sd.roughness[0] + '\n';
+                        } else {
+                            BufferedImage roughness = LABPBRParser.getRoughnessImage(sd.roughness, sd.cols_width);
+                            if (LABPBRParser.hasRoughness(roughness)) {
+                                String subpath = modelName + "_r.png";
+                                roughnessOutputLine = "map_Pr " + TEXTURE_DIR + '/' + subpath + '\n';
+                                resourceToRoughnessLineMap.put(quadResource, roughnessOutputLine);
+                                writeTextureOnThread(new File(texturePath, subpath), roughness);
+                            }
                         }
                     } else {
-                        roughnessTextureName = resourceToRoughnessMap.getOrDefault(quadResource, null);
+                        roughnessOutputLine = resourceToRoughnessLineMap.getOrDefault(quadResource, null);
                     }
-                    if (roughnessTextureName != null) {
-                        mtlWriter.write("map_Pr " + roughnessTextureName + '\n');
+                    if (roughnessOutputLine != null) {
+                        mtlWriter.write(roughnessOutputLine);
                     }
 
                     // Can this be made more accurate? How?
