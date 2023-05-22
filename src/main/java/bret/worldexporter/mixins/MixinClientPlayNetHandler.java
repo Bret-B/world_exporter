@@ -16,14 +16,8 @@ public class MixinClientPlayNetHandler {
 
     @Inject(at = @At(value = "HEAD"), method = "handleForgetLevelChunk", cancellable = true)
     private void onHandleForgetLevelChunk(SUnloadChunkPacket pPacket, CallbackInfo info) {
-        int keepDistance = WorldExporter.getForceChunkRadius();
-        ClientPlayerEntity player = Minecraft.getInstance().player;
-        if (player == null) return;
-
-        int chunkXDist = Math.abs(player.xChunk - pPacket.getX());
-        int chunkZDist = Math.abs(player.zChunk - pPacket.getZ());
         // cancel the chunk unload if it is within the custom WorldExporter force chunk radius
-        if (chunkXDist <= keepDistance && chunkZDist <= keepDistance) {
+        if (WorldExporter.isInKeepDistance(pPacket)) {
             info.cancel();
             WorldExporter.addHeldChunk(pPacket);
         }

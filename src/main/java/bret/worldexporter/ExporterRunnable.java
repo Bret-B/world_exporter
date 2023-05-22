@@ -115,10 +115,12 @@ class ExporterRunnable implements Runnable {
 
     private ArrayList<Quad> getNextChunkData(BlockPos start, BlockPos end) {
         resetBuilders();
+        ArrayList<Quad> quads = new ArrayList<>();
         Chunk chunk = exporter.world.getChunkAt(start);
+        if (chunk.isEmpty()) return quads;
+
         Random random = new Random();
         MatrixStack matrixStack = new MatrixStack();
-        ArrayList<Quad> quads = new ArrayList<>();
         for (BlockPos pos : BlockPos.betweenClosed(start, end)) {
             BlockState state = chunk.getBlockState(pos);
             if (state.getBlock().isAir(state, exporter.world, pos)) {
@@ -151,13 +153,18 @@ class ExporterRunnable implements Runnable {
                             // This may crash on non-main threads, fallback to main thread if so
                             renderTileEntity.run();
                         } catch (Exception e) {
-                            try {
-                                exporter.addTask(renderTileEntity);
-                                if (!renderTileEntity.get())
-                                    throw new RuntimeException("Unknown error while exporting tile entity on main thread.");
-                            } catch (Exception e2) {
-                                LOGGER.error("Unable to export tile entity: " + tileentity + "\nDue to multiple exceptions: ", e);
-                                LOGGER.error(e2);
+                            if (threaded) {
+                                try {
+                                    exporter.addTask(renderTileEntity);
+                                    if (!renderTileEntity.get())
+                                        throw new RuntimeException("Unknown error while exporting tile entity on main thread.");
+                                } catch (Exception e2) {
+                                    LOGGER.error("Unable to export tile entity: " + tileentity + "\nDue to multiple exceptions: ", e);
+                                    LOGGER.error(e2);
+                                }
+                            } else {
+                                // the failure was not threading related, so there's nothing that can be done
+                                LOGGER.error("Unknown error while exporting tile entity on main thread: " + tileentity + '\n', e);
                             }
                         }
 
@@ -216,13 +223,18 @@ class ExporterRunnable implements Runnable {
                     // If this happens, fallback to main thread
                     renderEntity.run();
                 } catch (Exception e) {
-                    try {
-                        exporter.addTask(renderEntity);
-                        if (!renderEntity.get())
-                            throw new RuntimeException("Unknown error while exporting entity on main thread.");
-                    } catch (Exception e2) {
-                        LOGGER.error("Unable to export entity: " + entity + "\nDue to multiple exceptions: ", e);
-                        LOGGER.error(e2);
+                    if (threaded) {
+                        try {
+                            exporter.addTask(renderEntity);
+                            if (!renderEntity.get())
+                                throw new RuntimeException("Unknown error while exporting entity on main thread.");
+                        } catch (Exception e2) {
+                            LOGGER.error("Unable to export entity: " + entity + "\nDue to multiple exceptions: ", e);
+                            LOGGER.error(e2);
+                        }
+                    } else {
+                        // the failure was not threading related, so there's nothing that can be done
+                        LOGGER.error("Unknown error while exporting entity on main thread: " + entity + '\n', e);
                     }
                 }
                 matrixStack.popPose();

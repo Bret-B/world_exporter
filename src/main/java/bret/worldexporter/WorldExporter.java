@@ -57,6 +57,17 @@ public class WorldExporter {
         return chunkXDist <= playerRender && chunkZDist <= playerRender;
     }
 
+    public static boolean isInKeepDistance(SUnloadChunkPacket packet) {
+        int keepDistance = WorldExporter.getForceChunkRadius();
+        ClientPlayerEntity player = Minecraft.getInstance().player;
+        if (player == null) return false;
+
+        int chunkXDist = Math.abs(player.xChunk - packet.getX());
+        int chunkZDist = Math.abs(player.zChunk - packet.getZ());
+        // the chunk unload should be canceled if it is within the custom WorldExporter force chunk radius
+        return chunkXDist <= keepDistance && chunkZDist <= keepDistance;
+    }
+
     private static void execute(String msg, ClientPlayerEntity player) {
         String[] params = msg.substring(CMD_BASE.length()).trim().split("\\s+");
         int radius = 64;
@@ -122,11 +133,15 @@ public class WorldExporter {
             ClientPlayNetHandler handler = Minecraft.getInstance().getConnection();
             if (handler == null) return;
 
-            for (SUnloadChunkPacket packet : heldChunks) {
+            HashSet<HashableSUnloadChunkPacket> toRemove = new HashSet<>();
+            for (HashableSUnloadChunkPacket packet : heldChunks) {
                 if (isInRender(packet.getX(), packet.getZ())) continue;
-                handler.handleForgetLevelChunk(packet);
+                if (!isInKeepDistance(packet)) {
+                    handler.handleForgetLevelChunk(packet);
+                    toRemove.add(packet);
+                }
             }
-            heldChunks.clear();
+            heldChunks.removeAll(toRemove);
         } catch (NumberFormatException exception) {
             player.sendMessage(new StringTextComponent("Could not update chunk radius."), Util.NIL_UUID);
         }
