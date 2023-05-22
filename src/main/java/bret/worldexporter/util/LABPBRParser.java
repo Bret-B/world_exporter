@@ -178,7 +178,7 @@ public class LABPBRParser {
             int grayValue = clamp(Math.round(data[i] * 255.0f));
             grayscaleData[i] = (byte) grayValue;
         }
-        image.setRGB(0, 0, width, data.length / width, grayscaleData, 0, width);
+        image.getRaster().setPixels(0, 0, width, data.length / width, grayscaleData);
         return image;
     }
 
