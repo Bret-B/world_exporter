@@ -21,8 +21,27 @@ lowres_threshold = 64  # you may find better results with a value of 32
 visible_emissive_strength = 5
 # actual_emissive_strength = 5  # TODO: actual_emissive_strength implementation
 normal_strength = 2.0
+merge_water_materials = True
 # Do not edit anything below this line unless you know what you're doing
 
+
+def merge_water(selected_objects):
+    water_mats = set()
+    is_water = ('minecraft-block-water-flow', 'minecraft-block-water-still', 'minecraft-block-water-overlay')
+    for selected_object in bpy.context.selected_objects:
+        water_mats.update([mat for mat in selected_object.data.materials if mat.name_full.startswith(is_water)])
+    water_mats = list(water_mats)
+    if len(water_mats) < 2:
+        return
+    
+    to_use = water_mats[0]
+    for other_mat in water_mats[1:]:
+        other_mat.user_remap(to_use)
+
+
+if merge_water_materials:
+    merge_water(bpy.context.selected_objects)
+    
 
 for selected_object in bpy.context.selected_objects:
     for mat in selected_object.data.materials:
