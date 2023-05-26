@@ -97,9 +97,9 @@ for selected_object in bpy.context.selected_objects:
                         if from_node.type != 'NORMAL_MAP':
                             skip = True
                         
-                        from_node.inputs['Strength'].default_value = normal_strength
                         normal_input = None
                         if skip is False:
+                            from_node.inputs['Strength'].default_value = normal_strength
                             test_input = from_node.inputs['Color'].links[0].from_node
                             if test_input.type == 'TEX_IMAGE':
                                 normal_input = test_input
