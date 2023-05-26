@@ -17,11 +17,12 @@ backface_culling = False  # optional, turning this on can make some textures app
 preserve_lowres_textures = True  # keeps the pixel art look of lowres textures instead of blurring them
 # if a texture width or height is <= this value and preserve_lowres_textures is True,
 # the texture's interpolation will be forced to 'Closest' to preserve the pixel art look of lowres textures
-lowres_threshold = 64  # you may find better results with a value of 32
+lowres_threshold = 256  # you may find better results with a different value such as 64, 128, ...
 visible_emissive_strength = 5
 # actual_emissive_strength = 5  # TODO: actual_emissive_strength implementation
-normal_strength = 2.0
+normal_strength = 1.0
 merge_water_materials = True
+set_nonzero_specular = 0.5  # default specular value to be used for materials with a specular value of 0.0
 # Do not edit anything below this line unless you know what you're doing
 
 
@@ -53,8 +54,11 @@ for selected_object in bpy.context.selected_objects:
             
         for node in mat.node_tree.nodes:
             if node.type == 'BSDF_PRINCIPLED':
-                print(node)
                 node.inputs['Emission Strength'].default_value = visible_emissive_strength
+
+                specular_input = node.inputs['Specular']
+                if specular_input.default_value == 0.0:  # strict floating point check is OK here since default is 0.0
+                    specular_input.default_value = 0.5
                 
                 if node.inputs['Alpha'].is_linked:
                     mat.blend_method = 'HASHED'
