@@ -13,6 +13,8 @@ public class MeshOptimizer {
 
     // returns true if a quad can be tiled for mesh optimization
     private static boolean canTile(Quad quad) {
+        if (!quad.hasUV()) return false;
+
         // must have UV coordinates capable of tiling (0/1)
         UVBounds uvbounds = quad.getUvBounds();
         if (!floatEq(uvbounds.uMin, 0.0f, ROUND_BITS)) return false;

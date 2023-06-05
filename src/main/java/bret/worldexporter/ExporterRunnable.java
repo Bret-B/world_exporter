@@ -67,7 +67,7 @@ class ExporterRunnable implements Runnable {
         this.threaded = threaded;
         this.chunkConsumer = chunkConsumer;
         this.chunksPerConsume = chunksPerConsume;
-        impl = new CustomImpl(exporter, this);
+        impl = new CustomImpl(this);
     }
 
     @Override
@@ -315,6 +315,10 @@ class ExporterRunnable implements Runnable {
             BufferBuilder.DrawState drawState = stateBufferPair.getFirst();
             VertexFormat format = type.format();
             if (drawState.vertexCount() == 0 || drawState.mode() != GL11.GL_QUADS || !Exporter.supportedVertexFormat(format)) {
+                if (drawState.vertexCount() != 0) {
+                    LOGGER.debug("A rendertype VertexFormat was not supported: " + type + '\n' + format + '\n' + format.getElements()
+                            + '\n' + "Using GL drawstate ID: " + drawState.mode());
+                }
                 continue;
             }
 
@@ -454,6 +458,10 @@ class ExporterRunnable implements Runnable {
         ByteBuffer bytebuffer = stateBufferPair.getSecond();
 
         if (drawState.vertexCount() == 0 || drawState.mode() != GL11.GL_QUADS || !Exporter.supportedVertexFormat(drawState.format())) {
+            if (drawState.vertexCount() != 0) {
+                LOGGER.debug("A rendertype VertexFormat was not supported: " + drawState.format() + '\n' + drawState.format().getElements()
+                        + '\n' + "Using GL drawstate ID: " + drawState.mode());
+            }
             return;
         }
 
@@ -475,6 +483,8 @@ class ExporterRunnable implements Runnable {
         List<Quad> quads = blockQuadsMap.values().stream().flatMap(Collection::stream).collect(Collectors.toList());
         quads.addAll(entityUUIDQuadsMap.values().stream().flatMap(Collection::stream).collect(Collectors.toList()));
         for (Quad quad : quads) {
+            if (!quad.hasUV()) continue;
+
             Texture baseTexture = exporter.getTexture(quad.getResource(), threaded);
             quad.setTexture(baseTexture);
             boolean didModifyUV = false;

@@ -14,8 +14,8 @@ public class Vertex {
     }
 
     public Vertex(Vertex other) {
-        this.position = new Vector3f(other.position);
-        this.uv = new Vector2f(other.uv);
+        this.position = other.position == null ? null : new Vector3f(other.position);
+        this.uv = other.uv == null ? null : new Vector2f(other.uv);
         this.color = other.color;
     }
 

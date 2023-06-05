@@ -99,7 +99,7 @@ public class ImgUtils {
         }
 
         for (int pixel : pixels) {
-            average += (pixel & 0xFF000000) >> 24;
+            average += (pixel & 0xFF000000) >>> 24;
         }
         return average / (image.getWidth() * image.getHeight());
     }

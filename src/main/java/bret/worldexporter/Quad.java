@@ -23,6 +23,7 @@ public class Quad {
     private Texture texture;
     private TextureAtlasSprite sprite;
     private int lightValue = 0;
+    private boolean hasFullUV = true;
 
     public Quad(RenderType renderType, ResourceLocation resource) {
         this.type = renderType;
@@ -35,11 +36,12 @@ public class Quad {
         }
         this.count = other.count;
         this.type = other.type;
-        this.uvBounds = new UVBounds(other.uvBounds);
+        this.uvBounds = other.uvBounds == null ? null : new UVBounds(other.uvBounds);
         this.resource = other.resource;
         this.texture = other.texture;
         this.sprite = other.sprite;
         this.lightValue = other.lightValue;
+        this.hasFullUV = other.hasFullUV;
     }
 
     public boolean overlaps(Quad second) {
@@ -95,11 +97,19 @@ public class Quad {
             throw new IllegalStateException("Quad already has 4 vertices");
         }
 
+        if (!vertex.hasUv()) {
+            hasFullUV = false;
+        }
+
         vertices[count++] = vertex;
 
         if (count == 4) {
             addUvBounds();
         }
+    }
+
+    public boolean hasUV() {
+        return getCount() == 4 && hasFullUV;
     }
 
     public Vertex[] getVertices() {
@@ -240,13 +250,15 @@ public class Quad {
     }
 
     private void addUvBounds() {
+        if (!hasUV()) return;
+
         uvBounds = new UVBounds();
         updateUvBounds();
     }
 
     private void validate() {
-        if (count < 4) {
-            throw new IllegalStateException();
+        if (count != 4) {
+            throw new IllegalStateException("Quad does not have 4 vertices");
         }
     }
 }

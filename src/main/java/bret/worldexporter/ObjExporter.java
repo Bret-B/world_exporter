@@ -10,6 +10,7 @@ import bret.worldexporter.util.OptifineReflector;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.util.ResourceLocation;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 
 import javax.imageio.ImageIO;
@@ -31,13 +32,14 @@ public class ObjExporter extends Exporter {
     private final Map<Vector2f, Integer> uvCache = new LRUCache<>(5000);
     private final int[] vertUVIndices = new int[8];
     private final Map<Triple<ResourceLocation, Integer, Integer>, Integer> modelToIdMap = new HashMap<>();
+    private final Map<Pair<Integer, Integer>, Integer> colorLightToIdMap = new HashMap<>();
     private final Map<ResourceLocation, String> resourceToNormalMap = new HashMap<>();
     private final Map<ResourceLocation, String> resourceToHeightMap = new HashMap<>();
     private final Map<ResourceLocation, String> resourceToAOMap = new HashMap<>();
     private final Map<ResourceLocation, String> resourceToMetalLineMap = new HashMap<>();
     private final Map<ResourceLocation, String> resourceToRoughnessLineMap = new HashMap<>();
     private final Map<Triple<ResourceLocation, Integer, Integer>, String> modelToEmissiveMap = new HashMap<>();
-    private final Map<Integer, ResourceLocation> modelIdToLocation = new HashMap<>();
+    private final Map<Integer, String> modelIdToName = new HashMap<>();
     private BufferedWriter lastObjWriter = null;
     private int modelCount = 0;
     private int vertCount = 0;
@@ -130,8 +132,47 @@ public class ObjExporter extends Exporter {
         boolean exportHeightmap = WorldExporterConfig.CLIENT.outputHeightmap.get();
         boolean exportAOMap = WorldExporterConfig.CLIENT.outputAmbientocclusionMap.get();
         for (Quad quad : exportChunk.quads) {
-            Triple<ResourceLocation, Integer, Integer> model = Triple.of(quad.getResource(), quad.getColor(), quad.getLightValue());
+            if (!quad.hasUV()) {
+                int color = quad.getColor();
+                if ((color & 0xFF000000) == 0) {
+                    LOGGER.warn("Skipped color-only face because it was completely transparent with color: " + Integer.toHexString(color));
+                    continue;
+                }
 
+                int modelId;
+                int light = quad.getLightValue();
+                Pair<Integer, Integer> colorModel = Pair.of(color, light);
+                if (!colorLightToIdMap.containsKey(colorModel)) {
+                    modelId = modelCount++;
+                    colorLightToIdMap.put(colorModel, modelId);
+                    BufferedImage image = generatePixelImage(color);
+                    String modelName = "color_" + Integer.toHexString(color) + (light == 0 ? "" : "_light_" + light) + '_' + modelId;
+                    modelIdToName.put(modelId, modelName);
+                    writeTextureOnThread(new File(texturePath, modelName + ".png"), image);
+                    mtlWriter.write("newmtl " + modelName + '\n');
+                    if (ImgUtils.imageHasTransparency(image)) {
+                        mtlWriter.write("map_d " + TEXTURE_DIR + '/' + modelName + ".png" + '\n');
+                    }
+
+                    if (light != 0) {
+                        String subpath = modelName + "_e.png";
+                        int lightValue = Math.max(0, Math.min(255, light * 17));
+                        lightValue = WorldExporterConfig.CLIENT.squareEmissivity.get() ? (lightValue * lightValue) / 255 : lightValue;
+                        lightValue = (lightValue << 24) | 0x00FFFFFF;  // alpha value to "dim" the image by
+                        BufferedImage emissive = ImgUtils.tintImage(image, lightValue);
+                        writeTextureOnThread(new File(texturePath, subpath), emissive);
+                        mtlWriter.write("map_Ke " + TEXTURE_DIR + '/' + subpath + '\n');
+                    }
+                    mtlWriter.write("map_Kd " + TEXTURE_DIR + '/' + modelName + ".png" + "\n\n");
+                } else {
+                    modelId = colorLightToIdMap.get(colorModel);
+                }
+
+                quadsForModel.computeIfAbsent(modelId, k -> new ArrayList<>()).add(quad);
+                continue;
+            }
+
+            Triple<ResourceLocation, Integer, Integer> model = Triple.of(quad.getResource(), quad.getColor(), quad.getLightValue());
             int modelId;
             if (!modelToIdMap.containsKey(model)) {
                 BufferedImage image = getImage(quad);
@@ -145,8 +186,8 @@ public class ObjExporter extends Exporter {
                 ResourceLocation quadResource = quad.getResource();
                 modelId = modelCount++;
                 modelToIdMap.put(model, modelId);
-                modelIdToLocation.put(modelId, quadResource);
                 String modelName = quadResource.toString().replaceAll("[^a-zA-Z0-9.-]", "-") + '_' + modelId;
+                modelIdToName.put(modelId, modelName);
 
                 String baseTextureName = modelName + ".png";
                 File fullTextureFilename = new File(texturePath, baseTextureName);
@@ -332,7 +373,7 @@ public class ObjExporter extends Exporter {
 
         // write all related quads for each material/model id to .obj file
         for (int modelId : quadsForModel.keySet()) {
-            objWriter.write("usemtl " + modelIdToLocation.get(modelId).toString().replaceAll("[^a-zA-Z0-9.-]", "-") + '_' + modelId + '\n');
+            objWriter.write("usemtl " + modelIdToName.get(modelId) + '\n');
             for (Quad quad : quadsForModel.get(modelId)) {
                 objWriter.write(quadToObj(quad));
             }
@@ -341,6 +382,7 @@ public class ObjExporter extends Exporter {
 
     // returns a String of relevant .obj file lines that represent the quad
     private synchronized String quadToObj(Quad quad) {
+        boolean hasUV = quad.hasUV();
         StringBuilder result = new StringBuilder(128);
         // loop through the quad vertices, calculating the .obj file index for position and uv coordinates
         for (int i = 0; i < 4; ++i) {
@@ -356,23 +398,33 @@ public class ObjExporter extends Exporter {
             }
             vertUVIndices[i] = vertIndex;
 
-            Vector2f uv = vertex.getUv();
-            int uvIndex;
-            if (uvCache.containsKey(uv)) {
-                uvIndex = uvCache.get(uv);
-            } else {
-                uvIndex = ++uvCount;
-                uvCache.put(uv, uvIndex);
-                result.append("vt ").append(uv.x).append(' ').append(uv.y).append('\n');
+            if (hasUV) {
+                Vector2f uv = vertex.getUv();
+                int uvIndex;
+                if (uvCache.containsKey(uv)) {
+                    uvIndex = uvCache.get(uv);
+                } else {
+                    uvIndex = ++uvCount;
+                    uvCache.put(uv, uvIndex);
+                    result.append("vt ").append(uv.x).append(' ').append(uv.y).append('\n');
+                }
+                vertUVIndices[i + 4] = uvIndex;
             }
-            vertUVIndices[i + 4] = uvIndex;
         }
 
-        // use the indices to write the quad's face information with the format: f v1/vt1 v2/vt2 v3/vt3 v4/vt4
-        result.append("f ").append(vertUVIndices[0]).append('/').append(vertUVIndices[4]).append(' ');
-        result.append(vertUVIndices[1]).append('/').append(vertUVIndices[5]).append(' ');
-        result.append(vertUVIndices[2]).append('/').append(vertUVIndices[6]).append(' ');
-        result.append(vertUVIndices[3]).append('/').append(vertUVIndices[7]).append("\n\n");
+        if (hasUV) {
+            // use the indices to write the quad's face information with the format: f v1/vt1 v2/vt2 v3/vt3 v4/vt4
+            result.append("f ").append(vertUVIndices[0]).append('/').append(vertUVIndices[4]).append(' ');
+            result.append(vertUVIndices[1]).append('/').append(vertUVIndices[5]).append(' ');
+            result.append(vertUVIndices[2]).append('/').append(vertUVIndices[6]).append(' ');
+            result.append(vertUVIndices[3]).append('/').append(vertUVIndices[7]).append("\n\n");
+        } else {
+            result.append("f ").append(vertUVIndices[0]).append(' ');
+            result.append(vertUVIndices[1]).append(' ');
+            result.append(vertUVIndices[2]).append(' ');
+            result.append(vertUVIndices[3]).append("\n\n");
+        }
+
         return result.toString();
     }
 

@@ -17,15 +17,13 @@ public class CustomImpl implements IRenderTypeBuffer {
     public final BufferBuilder builder;
     public final Map<RenderType, BufferBuilder> fixedBuffers;
     protected final Set<BufferBuilder> startedBuffers = Sets.newHashSet();
-    private final Exporter exporter;
     private final ExporterRunnable thread;
-    public Optional<RenderType> lastState = Optional.empty();
     // keeps track of vertexCounts for used buffers (updated when a new buffer is pulled from getBuffer)
-    private Map<RenderType, Integer> typeUsedVertices;
+    private final Map<RenderType, Integer> typeUsedVertices;
+    public Optional<RenderType> lastState = Optional.empty();
 
-    public CustomImpl(Exporter exporter, ExporterRunnable thread) {
+    public CustomImpl(ExporterRunnable thread) {
         this.builder = new BufferBuilder(2097152);
-        this.exporter = exporter;
         this.thread = thread;
         RegionRenderCacheBuilder basicBuilder = new RegionRenderCacheBuilder();
         RegionRenderCacheBuilder basicBuilder2 = new RegionRenderCacheBuilder();

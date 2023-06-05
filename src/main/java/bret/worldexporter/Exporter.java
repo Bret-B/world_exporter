@@ -123,6 +123,8 @@ public class Exporter {
     // Flips quad V values
     protected static void flipV(List<Quad> quads) {
         for (Quad quad : quads) {
+            if (!quad.hasUV()) continue;
+
             for (Vertex vertex : quad.getVertices()) {
                 vertex.getUv().y = 1 - vertex.getUv().y;
             }
@@ -159,7 +161,11 @@ public class Exporter {
     }
 
     public static boolean supportedVertexFormat(VertexFormat format) {
-        return format.getElements().contains(DefaultVertexFormats.ELEMENT_POSITION) && format.getElements().contains(DefaultVertexFormats.ELEMENT_UV0);
+        return format.getElements().contains(DefaultVertexFormats.ELEMENT_POSITION)
+                && (
+                format.getElements().contains(DefaultVertexFormats.ELEMENT_UV0)
+                        || format.getElements().contains(DefaultVertexFormats.ELEMENT_COLOR)
+        );
     }
 
     public int getGlTextureId(ResourceLocation resource, boolean threaded) {
@@ -361,6 +367,13 @@ public class Exporter {
         return image;
     }
 
+    // Generates a 1x1 pixel image with the color given by the quad
+    protected BufferedImage generatePixelImage(int color) {
+        BufferedImage image = new BufferedImage(1, 1, TYPE_INT_ARGB);
+        image.setRGB(0, 0, color);
+        return image;
+    }
+
     // Gets the specular texture for a quad, if any, and separates it into separate images specified in this lab-pbr format:
     // https://github.com/rre36/lab-pbr/wiki/Specular-Texture-Details
     @Nullable
@@ -475,8 +488,17 @@ public class Exporter {
                 float avg1;
                 float avg2;
                 synchronized (this) {
-                    avg1 = uvTransparencyCache.computeIfAbsent(Pair.of(quad1.getResource(), quad1.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad1)));
-                    avg2 = uvTransparencyCache.computeIfAbsent(Pair.of(quad2.getResource(), quad2.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad2)));
+                    if (quad1.hasUV()) {
+                        avg1 = uvTransparencyCache.computeIfAbsent(Pair.of(quad1.getResource(), quad1.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad1)));
+                    } else {
+                        avg1 = (float) ((quad1.getColor() & 0xFF000000) >>> 24);
+                    }
+
+                    if (quad2.hasUV()) {
+                        avg2 = uvTransparencyCache.computeIfAbsent(Pair.of(quad2.getResource(), quad2.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad2)));
+                    } else {
+                        avg2 = (float) ((quad2.getColor() & 0xFF000000) >>> 24);
+                    }
                 }
                 return Float.compare(avg1, avg2);
             } else {
