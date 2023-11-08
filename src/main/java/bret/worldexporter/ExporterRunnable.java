@@ -6,6 +6,7 @@ import bret.worldexporter.legacylwjgl.Vector3f;
 import com.mojang.blaze3d.matrix.MatrixStack;
 import net.minecraft.block.BlockRenderType;
 import net.minecraft.block.BlockState;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.RenderTypeLookup;
@@ -24,7 +25,9 @@ import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.AxisAlignedBB;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.chunk.Chunk;
+import net.minecraftforge.client.ForgeHooksClient;
 import net.minecraftforge.client.model.ModelDataManager;
+import net.minecraftforge.client.model.data.EmptyModelData;
 import net.minecraftforge.client.model.data.IModelData;
 import org.apache.commons.lang3.tuple.Pair;
 import org.lwjgl.opengl.GL11;
@@ -108,7 +111,7 @@ class ExporterRunnable implements Runnable {
             } else {
                 chunkConsumer.accept(toConsume);
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             LOGGER.warn("Unable to handle list of ExportChunks in ExporterRunnable: ", e);
         }
     }
@@ -121,6 +124,7 @@ class ExporterRunnable implements Runnable {
 
         Random random = new Random();
         MatrixStack matrixStack = new MatrixStack();
+        float partialTicks = Minecraft.getInstance().getFrameTime();
         for (BlockPos pos : BlockPos.betweenClosed(start, end)) {
             BlockState state = chunk.getBlockState(pos);
             if (state.getBlock().isAir(state, exporter.world, pos)) {
@@ -142,8 +146,6 @@ class ExporterRunnable implements Runnable {
                     if (tileEntityRenderer != null) {
                         matrixStack.pushPose();
                         matrixStack.translate(pos.getX(), pos.getY(), pos.getZ());
-                        float partialTicks = 0;
-
                         RunnableFuture<Boolean> renderTileEntity = new FutureTask<>(() -> {
                             tileEntityRenderer.render(tileentity, partialTicks, matrixStack, impl, i, OverlayTexture.NO_OVERLAY);
                             return true;
@@ -152,13 +154,13 @@ class ExporterRunnable implements Runnable {
                         try {
                             // This may crash on non-main threads, fallback to main thread if so
                             renderTileEntity.run();
-                        } catch (Exception e) {
+                        } catch (Throwable e) {
                             if (threaded) {
                                 try {
                                     exporter.addTask(renderTileEntity);
                                     if (!renderTileEntity.get())
                                         throw new RuntimeException("Unknown error while exporting tile entity on main thread.");
-                                } catch (Exception e2) {
+                                } catch (Throwable e2) {
                                     LOGGER.error("Unable to export tile entity: " + tileentity + "\nDue to multiple exceptions: ", e);
                                     LOGGER.error(e2);
                                 }
@@ -176,18 +178,33 @@ class ExporterRunnable implements Runnable {
             // The rendering logic is roughly taken from ChunkRenderDispatcher.compile with multiple tweaks
             FluidState fluidState = exporter.world.getFluidState(pos);
             IModelData modelData = ModelDataManager.getModelData(exporter.world, pos);
+            // This more accurately matches the base ChunkRenderDispatcher code, since getModelData can be null
+            modelData = modelData == null ? EmptyModelData.INSTANCE : modelData;
             for (RenderType rendertype : RenderType.chunkBufferLayers()) {
+                // It appears some mods use MinecraftForgeClient.getRenderLayer() for branching rendering behavior,
+                // so it needs to be set properly before rendering here
+                // The map this updates is ThreadLocal
+                ForgeHooksClient.setRenderLayer(rendertype);
+
                 if (!fluidState.isEmpty() && RenderTypeLookup.canRenderInLayer(fluidState, rendertype)) {
                     BitSet forceRender = exporter.getForcedDirections(pos);
                     BufferBuilder bufferbuilder = impl.getBuffer(rendertype);  // automatically starts buffer
-                    exporter.blockRendererDispatcher.renderLiquid(pos, exporter.world, bufferbuilder, fluidState, 0, 0, forceRender);
+                    try {
+                        exporter.blockRendererDispatcher.renderLiquid(pos, exporter.world, bufferbuilder, fluidState, 0, 0, forceRender);
+                    } catch (Throwable e) {
+                        LOGGER.warn("Unable to render fluid block '" + fluidState.getType().getBucket() + "' at " + pos);
+                    }
                 }
                 if (state.getRenderShape() != BlockRenderType.INVISIBLE && RenderTypeLookup.canRenderInLayer(state, rendertype)) {
                     matrixStack.pushPose();
                     matrixStack.translate(pos.getX(), pos.getY(), pos.getZ());
                     BitSet forceRender = exporter.getForcedDirections(pos);
                     BufferBuilder bufferbuilder = impl.getBuffer(rendertype);   // automatically starts buffer
-                    exporter.blockRendererDispatcher.renderModel(state, pos, exporter.world, matrixStack, bufferbuilder, forceRender, random, modelData, exporter.randomize);
+                    try {
+                        exporter.blockRendererDispatcher.renderModel(state, pos, exporter.world, matrixStack, bufferbuilder, forceRender, random, modelData, exporter.randomize);
+                    } catch (Throwable e) {
+                        LOGGER.warn("Unable to render block '" + state + "' at " + pos, e);
+                    }
 
                     // TODO: useful?
 //                    if (state.getRenderShape() == BlockRenderType.ENTITYBLOCK_ANIMATED && modelData != null) {
@@ -198,6 +215,7 @@ class ExporterRunnable implements Runnable {
                     matrixStack.popPose();
                 }
             }
+            ForgeHooksClient.setRenderLayer(null);
             postCountLayerVertices();
         }
 
@@ -209,7 +227,6 @@ class ExporterRunnable implements Runnable {
 
                 preEntity(entity.getUUID());
                 matrixStack.pushPose();
-                float partialTicks = 0;
                 int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright
                 RunnableFuture<Boolean> renderEntity = new FutureTask<>(() -> {
                     exporter.mc.getEntityRenderDispatcher().render(entity, entity.getX(), entity.getY(), entity.getZ(), entity.yRot,
@@ -217,18 +234,18 @@ class ExporterRunnable implements Runnable {
                     return true;
                 });
                 try {
-                    // optifine can cause this to crash because it calls parts of RenderSystem which check the thread it is running on
+                    // optifine can cause this to crash because it calls parts of RenderSystem which verify execution on the render/main thread
                     // causing a crash on threads other than the render thread
                     // So far, I have seen this occur with leashed entities.
                     // If this happens, fallback to main thread
                     renderEntity.run();
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     if (threaded) {
                         try {
                             exporter.addTask(renderEntity);
                             if (!renderEntity.get())
                                 throw new RuntimeException("Unknown error while exporting entity on main thread.");
-                        } catch (Exception e2) {
+                        } catch (Throwable e2) {
                             LOGGER.error("Unable to export entity: " + entity + "\nDue to multiple exceptions: ", e);
                             LOGGER.error(e2);
                         }
@@ -489,8 +506,8 @@ class ExporterRunnable implements Runnable {
             quad.setTexture(baseTexture);
             boolean didModifyUV = false;
             // allowed error is very small by default
-            float allowableErrorU = 0.00001f;
-            float allowableErrorV = 0.00001f;
+            float allowableErrorU = 0.0001f;
+            float allowableErrorV = 0.0001f;
             if (baseTexture instanceof AtlasTexture) {
                 Pair<ResourceLocation, TextureAtlasSprite> nameAndTexture = exporter.getTextureFromAtlas(quad.getResource(), quad.getUvBounds(), threaded);
                 if (nameAndTexture != null) {
@@ -566,10 +583,11 @@ class ExporterRunnable implements Runnable {
                 Set<Integer> newToCheck = new HashSet<>();
                 for (int quadIndex : toCheck) {
                     Quad first = quads.get(quadIndex);
-                    ArrayList<Integer> overlapsWithFirst = new ArrayList<>();
+                    ArrayList<Pair<Integer, Float>> overlapsWithFirst = new ArrayList<>();
                     for (int j = quadIndex + 1; j < quads.size(); ++j) {
-                        if (first.overlaps(quads.get(j))) {
-                            overlapsWithFirst.add(j);
+                        float overlapDistance = first.overlaps(quads.get(j));
+                        if (overlapDistance != Float.POSITIVE_INFINITY) {
+                            overlapsWithFirst.add(Pair.of(j, overlapDistance));
                         }
                     }
 
@@ -577,9 +595,14 @@ class ExporterRunnable implements Runnable {
                         continue;
                     }
 
-                    Vector3f posTranslate = (Vector3f) first.getNormal().scale(0.00075f);
-                    for (int overlapQuad : overlapsWithFirst) {
-                        quads.get(overlapQuad).translate(posTranslate);
+                    for (Pair<Integer, Float> quadIndexDistance : overlapsWithFirst) {
+                        int overlapQuad = quadIndexDistance.getLeft();
+                        float distance = quadIndexDistance.getRight();
+                        Quad toOffset = quads.get(overlapQuad);
+                        // scale the toOffset quad such that it is overlapDistance away from the other quad
+                        float scaleDistance = WorldExporterConfig.CLIENT.overlapDistance.get().floatValue() - distance;
+                        Vector3f posTranslate = (Vector3f) toOffset.getNormal().scale(scaleDistance);
+                        toOffset.translate(posTranslate);
                         newToCheck.add(overlapQuad);
                     }
                 }

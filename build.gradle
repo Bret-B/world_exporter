@@ -134,12 +134,12 @@ minecraft {
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 // for running the dev environment with other mods
-//repositories {
+repositories {
 //     maven { url = "https://dvs1.progwml6.com/files/maven/" }
-//    flatDir {
-//        dirs 'libs'
-//    }
-//}
+    flatDir {
+        dirs 'libs'
+    }
+}
 
 dependencies {
     // Specify the version of Minecraft to use, If this is any group other then 'net.minecraft' it is assumed
@@ -170,6 +170,20 @@ dependencies {
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
 
+    // For CodeChickenLib + running dev environment with other mods
+    // compileOnly fileTree(dir: "libs", include: "**/*.jar")  // ?
+    runtimeOnly fg.deobf("codechicken:CodeChickenLib:1.16.5-4.0.7.445-universal")
+    runtimeOnly fg.deobf("framedblocks:FramedBlocks:2.16.1")
+    runtimeOnly fg.deobf("cofh:cofh_core:1.16.5-1.5.0.11")
+    runtimeOnly fg.deobf("thermalexpansion:thermal_expansion:1.16.5-1.5.0.7")
+    runtimeOnly fg.deobf("thermalexpansion:thermal_cultivation:1.16.5-1.5.0.4")
+    runtimeOnly fg.deobf("thermalexpansion:thermal_foundation:1.16.5-1.5.0.14")
+    runtimeOnly fg.deobf("thermalexpansion:thermal_innovation:1.16.5-1.5.0.4")
+    runtimeOnly fg.deobf("thermalexpansion:thermal_locomotion:1.16.5-1.5.0.4")
+    runtimeOnly fg.deobf("thermalexpansion:thermal_locomotion:1.16.5-1.5.0.4")
+    runtimeOnly fg.deobf("ctm:CTM:MC1.16.1-1.1.2.6")
+    runtimeOnly fg.deobf("zycraft:ZYCraft:1.16.5-3.1.34")
+    runtimeOnly fg.deobf("configured:configured:1.5.2-1.16.5")
 }
 
 mixin {

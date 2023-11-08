@@ -49,6 +49,7 @@ public class WorldExporterConfig {
         public final BooleanValue forceResourceEmissivity;
         public final BooleanValue forceOutputUniformMaps;
         public final DoubleValue normalStrength;
+        public final DoubleValue overlapDistance;
 
         Client(final ForgeConfigSpec.Builder builder) {
             builder.comment("Client-only settings").push("client");
@@ -94,7 +95,7 @@ public class WorldExporterConfig {
                     .define("outputAmbientocclusionMap", false);
 
             perceptualRoughness = builder
-                    .comment("Export roughness maps using the a perceptual/linear scale (enable for Blender)")
+                    .comment("Export roughness maps using a perceptual/linear scale (enable for Blender)")
                     .translation("worldexporter.config.client.perceptualRoughness")
                     .define("perceptualRoughness", true);
 
@@ -109,9 +110,15 @@ public class WorldExporterConfig {
                     .define("squareEmissivity", false);
 
             forceOutputUniformMaps = builder
-                    .comment("Always export a grayscale texture image instead of a numeric value even if the image is uniform. Applies to roughness and metallic maps.")
+                    .comment("Always export a grayscale texture image instead of a numeric value even if the image is uniform. Applies to roughness and metallic maps")
                     .translation("worldexporter.config.client.forceOutputUniformMaps")
                     .define("forceOutputUniformMaps", false);
+
+            overlapDistance = builder
+                    .comment("At this distance or smaller, faces are considered to overlap and therefore need to be offset from each other to avoid z-fighting." +
+                            " Raise this if you experience z-fighting problems, but keep it as low as possible")
+                    .translation("worldexporter.config.client.overlapDistance")
+                    .defineInRange("overlapDistance", 0.0005, 0.0, 0.1);
 
             builder.pop();
         }

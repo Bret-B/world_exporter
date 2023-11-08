@@ -395,7 +395,7 @@ public class Exporter {
     // expects either the norm or spec fields from OptifineReflector
     @Nullable
     private BufferedImage getImageForField(Quad quad, Field field) {
-        BufferedImage image;
+        BufferedImage image = null;
         if (quad.getSprite() != null) {
             TextureAtlasSprite sprite = quad.getSprite();
             Texture atlas = sprite.atlas();
@@ -403,9 +403,9 @@ public class Exporter {
                 Object multiTex = OptifineReflector.multiTex.get(atlas);
                 int glTextureId = field.getInt(multiTex);
                 image = getAtlasSubImage(sprite, -1, glTextureId);
-            } catch (IllegalAccessException e) {
-                LOGGER.warn("Unable to access an optifine field: " + field);
-                return null;
+            } catch (Exception e) {
+                LOGGER.warn("Unable to access an optifine field: " + field + ", disabling optifine for this export.", e);
+                OptifineReflector.validOptifine = false;
             }
         } else if (quad.getTexture() != null) {
             Texture texture = quad.getTexture();
@@ -413,12 +413,10 @@ public class Exporter {
                 Object multiTex = OptifineReflector.multiTex.get(texture);
                 int glTextureId = field.getInt(multiTex);
                 image = getAtlasImage(glTextureId);
-            } catch (IllegalAccessException e) {
-                LOGGER.warn("Unable to access an optifine field: " + field);
-                return null;
+            } catch (Exception e) {
+                LOGGER.warn("Unable to access an optifine field: " + field + ", disabling optifine for this export.", e);
+                OptifineReflector.validOptifine = false;
             }
-        } else {
-            return null;
         }
 
         return image;
@@ -472,11 +470,10 @@ public class Exporter {
         return (quad1, quad2) -> {
             RenderType quad1Layer = quad1.getType();
             RenderType quad2Layer = quad2.getType();
-            if (quad1Layer.equals(quad2Layer)) {
-                return 0;
-            } else {
-                return Integer.compare(renderOrder.getOrDefault(quad1Layer, OTHER_ORDER), renderOrder.getOrDefault(quad2Layer, OTHER_ORDER));
-            }
+            int layer1Priority = renderOrder.getOrDefault(quad1Layer, OTHER_ORDER);
+            int layer2Priority = renderOrder.getOrDefault(quad2Layer, OTHER_ORDER);
+            // higher priority -> more transparent
+            return Integer.compare(layer1Priority, layer2Priority);
         };
     }
 
@@ -484,7 +481,9 @@ public class Exporter {
         return (quad1, quad2) -> {
             RenderType quad1Layer = quad1.getType();
             RenderType quad2Layer = quad2.getType();
-            if (quad1Layer.equals(quad2Layer)) {
+            int layer1Priority = renderOrder.getOrDefault(quad1Layer, -1);
+            int layer2Priority = renderOrder.getOrDefault(quad2Layer, -1);
+            if (layer1Priority == -1 || layer2Priority == -1 || layer1Priority == layer2Priority) {
                 float avg1;
                 float avg2;
                 synchronized (this) {
@@ -500,9 +499,11 @@ public class Exporter {
                         avg2 = (float) ((quad2.getColor() & 0xFF000000) >>> 24);
                     }
                 }
-                return Float.compare(avg1, avg2);
+                // higher avg -> less transparent
+                return Float.compare(avg2, avg1);
             } else {
-                return Integer.compare(renderOrder.getOrDefault(quad1Layer, OTHER_ORDER), renderOrder.getOrDefault(quad2Layer, OTHER_ORDER));
+                // higher priority -> more transparent
+                return Integer.compare(layer1Priority, layer2Priority);
             }
         };
     }

@@ -2,12 +2,11 @@ package bret.worldexporter;
 
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
-import org.apache.commons.lang3.tuple.Triple;
 
 import java.util.*;
 
 public class MeshOptimizer {
-    private final static int ROUND_BITS = 11;
+    private final static int ROUND_BITS = 2;
     private static final Comparator<Quad> quadComparator = getQuadComparator();
     private final Map<Edge, List<Quad>> edgeQuadsMap = new HashMap<>();
 
@@ -70,7 +69,7 @@ public class MeshOptimizer {
     // merging quads that share an edge by adding the UV coordinate difference to the resulting quad UV's
     // and merging the proper position vertices.
     public ArrayList<Quad> optimize(List<Quad> quads) {
-        Map<Triple<String, Long, Vector3f>, TreeSet<Quad>> subSets = new HashMap<>();
+        Map<SubsetKey, TreeSet<Quad>> subSets = new HashMap<>();
         ArrayList<Quad> optimizedQuads = new ArrayList<>();
         for (Quad quad : quads) {
             if (!canTile(quad)) {
@@ -79,18 +78,7 @@ public class MeshOptimizer {
                 continue;
             }
 
-            // an ordered UV hash is needed here, since even the same vertex ordered quad with the same texture and UVs
-            // can have differing UV orders per vertex (Minecraft has multiple different UV texture orders for some blocks).
-            long UVHash = 0;
-            for (Vertex v : quad.getVertices()) {
-                UVHash = 31 * UVHash + v.getUv().hashCode();
-            }
-            String texture = quad.getResource().toString();
-            Vector3f normal = quad.getNormal();
-            normal.x = roundBits(normal.x, ROUND_BITS);
-            normal.y = roundBits(normal.y, ROUND_BITS);
-            normal.z = roundBits(normal.z, ROUND_BITS);
-            Triple<String, Long, Vector3f> key = Triple.of(texture, UVHash, normal);
+            SubsetKey key = new SubsetKey(quad);
             subSets.computeIfAbsent(key, k -> new TreeSet<>(quadComparator)).add(quad);
         }
 
@@ -249,6 +237,54 @@ public class MeshOptimizer {
         @Override
         public int hashCode() {
             return Objects.hash(p1) + Objects.hash(p2);
+        }
+    }
+
+    private static class SubsetKey {
+        private final String texture;
+        private final Vector3f normal;
+        private final int color;
+        private final int uvHash;
+        private final Vertex[] vertices;
+
+        public SubsetKey(Quad quad) {
+            texture = quad.getResource().toString();
+            vertices = quad.getVertices();
+            normal = quad.getNormal();
+            color = quad.getColor();
+
+            normal.x = roundBits(normal.x, ROUND_BITS);
+            normal.y = roundBits(normal.y, ROUND_BITS);
+            normal.z = roundBits(normal.z, ROUND_BITS);
+
+            // an ordered UV hash is needed here, since even the same vertex ordered quad with the same texture and UVs
+            // can have differing UV orders per vertex (Minecraft has multiple different UV texture orders for some blocks).
+            int hash = 1;
+            for (Vertex v : vertices) {
+                hash = 31 * hash + v.getUv().hashCode();
+            }
+            uvHash = hash;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (obj == null || getClass() != obj.getClass()) return false;
+            SubsetKey other = (SubsetKey) obj;
+            boolean equal = texture.equals(other.texture) && normal.equals(other.normal) && color == other.color;
+            if (!equal) {
+                return false;
+            }
+
+            for (int i = 0; i < 4; i++) {
+                equal = equal && vertices[i].getUv().equals(other.vertices[i].getUv());
+            }
+            return equal;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(texture, normal, color, uvHash);
         }
     }
 }

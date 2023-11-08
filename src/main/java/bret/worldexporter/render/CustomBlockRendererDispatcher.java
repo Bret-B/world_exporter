@@ -11,9 +11,6 @@ import net.minecraft.client.renderer.color.BlockColors;
 import net.minecraft.client.renderer.model.IBakedModel;
 import net.minecraft.client.renderer.model.ItemCameraTransforms;
 import net.minecraft.client.renderer.texture.OverlayTexture;
-import net.minecraft.crash.CrashReport;
-import net.minecraft.crash.CrashReportCategory;
-import net.minecraft.crash.ReportedException;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
@@ -44,27 +41,13 @@ public class CustomBlockRendererDispatcher {
     }
 
     public boolean renderModel(BlockState blockStateIn, BlockPos posIn, IBlockDisplayReader lightReaderIn, MatrixStack matrixStackIn, IVertexBuilder vertexBuilderIn, BitSet forceRender, Random rand, net.minecraftforge.client.model.data.IModelData modelData, boolean randomize) {
-        try {
-            long randSeed = randomize ? blockStateIn.getSeed(posIn) : 0;
-            BlockRenderType blockrendertype = blockStateIn.getRenderShape();
-            return blockrendertype != BlockRenderType.MODEL ? false : this.modelRenderer.renderModel(lightReaderIn, this.getBlockModel(blockStateIn), blockStateIn, posIn, matrixStackIn, vertexBuilderIn, forceRender, rand, randSeed, OverlayTexture.NO_OVERLAY, modelData);
-        } catch (Throwable throwable) {
-            CrashReport crashreport = CrashReport.forThrowable(throwable, "Tesselating block in world");
-            CrashReportCategory crashreportcategory = crashreport.addCategory("Block being tesselated");
-            CrashReportCategory.populateBlockDetails(crashreportcategory, posIn, blockStateIn);
-            throw new ReportedException(crashreport);
-        }
+        long randSeed = randomize ? blockStateIn.getSeed(posIn) : 0;
+        BlockRenderType blockrendertype = blockStateIn.getRenderShape();
+        return blockrendertype == BlockRenderType.MODEL && this.modelRenderer.renderModel(lightReaderIn, this.getBlockModel(blockStateIn), blockStateIn, posIn, matrixStackIn, vertexBuilderIn, forceRender, rand, randSeed, OverlayTexture.NO_OVERLAY, modelData);
     }
 
     public boolean renderLiquid(BlockPos pPos, IBlockDisplayReader pLightReader, IVertexBuilder pVertexBuilder, FluidState pFluidState, int xOff, int zOff, BitSet forceRender) {
-        try {
-            return this.liquidBlockRenderer.tesselate(pLightReader, pPos, pVertexBuilder, pFluidState, xOff, zOff, forceRender);
-        } catch (Throwable throwable) {
-            CrashReport crashreport = CrashReport.forThrowable(throwable, "Tesselating liquid in world");
-            CrashReportCategory crashreportcategory = crashreport.addCategory("Block being tesselated");
-            CrashReportCategory.populateBlockDetails(crashreportcategory, pPos, (BlockState) null);
-            throw new ReportedException(crashreport);
-        }
+        return this.liquidBlockRenderer.tesselate(pLightReader, pPos, pVertexBuilder, pFluidState, xOff, zOff, forceRender);
     }
 
     public IBakedModel getBlockModel(BlockState pState) {

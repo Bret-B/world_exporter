@@ -35,7 +35,8 @@ def merge_water(selected_objects):
     if len(water_mats) < 2:
         return
     
-    to_use = water_mats[0]
+    still_mats = [mat for mat in water_mats if mat.name_full.startswith('minecraft-block-water-still')]
+    to_use = still_mats[0] if still_mats else water_mats[0]
     for other_mat in water_mats[1:]:
         other_mat.user_remap(to_use)
 

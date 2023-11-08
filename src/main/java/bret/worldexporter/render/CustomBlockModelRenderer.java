@@ -10,9 +10,6 @@ import net.minecraft.client.renderer.WorldRenderer;
 import net.minecraft.client.renderer.color.BlockColors;
 import net.minecraft.client.renderer.model.BakedQuad;
 import net.minecraft.client.renderer.model.IBakedModel;
-import net.minecraft.crash.CrashReport;
-import net.minecraft.crash.CrashReportCategory;
-import net.minecraft.crash.ReportedException;
 import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
@@ -62,21 +59,11 @@ public class CustomBlockModelRenderer {
         Vector3d vector3d = stateIn.getOffset(worldIn, posIn);
         matrixIn.translate(vector3d.x, vector3d.y, vector3d.z);
         modelData = modelIn.getModelData(worldIn, posIn, stateIn, modelData);
-
-        try {
-            return this.renderModelFlat(worldIn, modelIn, stateIn, posIn, matrixIn, buffer, forceRender, randomIn, rand, combinedOverlayIn, modelData);
-
-            // optifine calls renderOverlayModels here, not sure what this does.
-//            if (rendered) {
-//                this.renderOverlayModels(worldIn, modelIn, stateIn, posIn, matrixIn, buffer, combinedOverlayIn, checkSides, randomIn, rand, renderEnv, flag, vector3d);
-//            }
-        } catch (Throwable throwable) {
-            CrashReport crashreport = CrashReport.forThrowable(throwable, "Tesselating block model");
-            CrashReportCategory crashreportcategory = crashreport.addCategory("Block model being tesselated");
-            CrashReportCategory.populateBlockDetails(crashreportcategory, posIn, stateIn);
-            crashreportcategory.setDetail("Using AO", false);
-            throw new ReportedException(crashreport);
-        }
+        return this.renderModelFlat(worldIn, modelIn, stateIn, posIn, matrixIn, buffer, forceRender, randomIn, rand, combinedOverlayIn, modelData);
+        // optifine calls renderOverlayModels here, not sure what this does.
+//        if (rendered) {
+//            this.renderOverlayModels(worldIn, modelIn, stateIn, posIn, matrixIn, buffer, combinedOverlayIn, checkSides, randomIn, rand, renderEnv, flag, vector3d);
+//        }
     }
 
     @SuppressWarnings("unchecked")

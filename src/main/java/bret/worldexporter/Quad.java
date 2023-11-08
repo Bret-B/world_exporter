@@ -1,5 +1,6 @@
 package bret.worldexporter;
 
+import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.legacylwjgl.Matrix3f;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
@@ -13,7 +14,7 @@ import java.util.Arrays;
 import java.util.Objects;
 
 public class Quad {
-    private static final float TOLERANCE = 0.001f;
+    private static final float NORMAL_OVERLAP_SQ = 0.0001f;  // 0.01 regular distance
     private static final Vector3f DESIRED_NORM = new Vector3f(0, 0, 1);
     private final Vertex[] vertices = new Vertex[4];
     private final RenderType type;
@@ -44,14 +45,26 @@ public class Quad {
         this.hasFullUV = other.hasFullUV;
     }
 
-    public boolean overlaps(Quad second) {
-        // rotate a copy of both quads in the plane such that their x and y coordinates can be compared
+    // returns positive infinity if the quads do not overlap
+    // otherwise, they are considered to overlap within TOLERANCE, and this returns their distance from each other
+    // which is positive or negative relative to this quad
+    public float overlaps(Quad second) {
+        Vector3f thisNorm = this.getNormal();
+        Vector3f secondNorm = second.getNormal();
+        // if the normals are not relatively similar, they should not be considered overlapping (no z-fighting)
+        // since they are normalized, comparing their distance is a good-enough estimate, though the distance also
+        // needs to be checked against the max distance that can occur (2) if the normals face directly opposite each other
+        // (given that the faces are not backface-culled)
+        float normalDistanceSq = thisNorm.distanceSq(secondNorm);
+        if (normalDistanceSq > NORMAL_OVERLAP_SQ && normalDistanceSq < 2 - NORMAL_OVERLAP_SQ) {
+            return Float.POSITIVE_INFINITY;
+        }
+
+        float overlapDistance = WorldExporterConfig.CLIENT.overlapDistance.get().floatValue();
+        // rotate a copy of both quads in space such that their x and y coordinates can be compared
         // (such that they lie flat along a xy plane (the z coordinate will vary))
         Quad thisCopy = new Quad(this);
         Quad secondCopy = new Quad(second);
-
-        Vector3f thisNorm = thisCopy.getNormal();
-        Vector3f secondNorm = secondCopy.getNormal();
 
         Matrix3f rotateByThis = VectorUtils.getRotationMatrix(thisNorm, DESIRED_NORM);
         Matrix3f rotateBySecond = VectorUtils.getRotationMatrix(secondNorm, DESIRED_NORM);
@@ -66,13 +79,19 @@ public class Quad {
         Vector3f[] minMaxPos = thisCopy.minMaxPositions();
         Vector3f[] minMaxPosSecond = secondCopy.minMaxPositions();
 
-        // if the planes are not close enough that they should be considered overlapping, return false
-        if (Math.abs(minMaxPos[1].z - minMaxPosSecond[1].z) > TOLERANCE) {
-            return false;
+        float distance = minMaxPos[1].z - minMaxPosSecond[1].z;
+        // the planes are not close enough that they should be considered overlapping
+        if (Math.abs(distance) > overlapDistance) {
+            return Float.POSITIVE_INFINITY;
         }
 
-        return (minMaxPos[1].x - minMaxPosSecond[0].x > TOLERANCE) && (minMaxPos[0].x - minMaxPosSecond[1].x < -TOLERANCE)
-                && (minMaxPos[1].y - minMaxPosSecond[0].y > TOLERANCE) && (minMaxPos[0].y - minMaxPosSecond[1].y) < -TOLERANCE;
+        if ((minMaxPos[1].x - minMaxPosSecond[0].x > overlapDistance) && (minMaxPos[0].x - minMaxPosSecond[1].x < -overlapDistance)
+                && (minMaxPos[1].y - minMaxPosSecond[0].y > overlapDistance) && (minMaxPos[0].y - minMaxPosSecond[1].y) < -overlapDistance) {
+            // the quads are inside each other (this is probably not accurate if they are rotated differently)
+            return distance;
+        } else {
+            return Float.POSITIVE_INFINITY;
+        }
     }
 
     public Vector3f[] minMaxPositions() {
@@ -196,6 +215,8 @@ public class Quad {
         if (type != quad.type) return false;
         if (resource != quad.resource) return false;
         if (texture != quad.texture) return false;
+        if (lightValue != quad.lightValue) return false;
+        if (sprite != quad.sprite) return false;
         for (int i = 0; i < count; ++i) {
             boolean hasEquivalence = false;
             boolean hasUvEquivalence = false;
@@ -222,7 +243,8 @@ public class Quad {
         if (o == null || getClass() != o.getClass()) return false;
         Quad quad = (Quad) o;
         return count == quad.count && type.equals(quad.type) && Arrays.equals(vertices, quad.vertices)
-                && resource.equals(quad.resource) && texture.equals(quad.texture);
+                && resource.equals(quad.resource) && texture.equals(quad.texture) && lightValue == quad.lightValue
+                && sprite.equals(quad.sprite);
     }
 
     @Override
