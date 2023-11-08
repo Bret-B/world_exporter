@@ -1,5 +1,6 @@
 package bret.worldexporter;
 
+import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.render.CustomBlockRendererDispatcher;
 import bret.worldexporter.util.ImgUtils;
 import bret.worldexporter.util.LABPBRParser;
@@ -59,6 +60,8 @@ public class Exporter {
     protected final ClientWorld world = Objects.requireNonNull(mc.level);
     protected final int playerX;
     protected final int playerZ;
+    public final int playerXOffset;
+    public final int playerZOffset;
     private final Map<Pair<ResourceLocation, UVBounds>, Pair<ResourceLocation, TextureAtlasSprite>> atlasUVToSpriteCache = new HashMap<>();
     private final Map<Pair<ResourceLocation, UVBounds>, Float> uvTransparencyCache = new HashMap<>();
     private final Comparator<Quad> quadComparator = getQuadSort();
@@ -84,6 +87,8 @@ public class Exporter {
         upperHeightLimit = upper;
         playerX = (int) player.getX();
         playerZ = (int) player.getZ();
+        playerXOffset = WorldExporterConfig.CLIENT.relativeCoordinates.get() ? playerX : 0;
+        playerZOffset = WorldExporterConfig.CLIENT.relativeCoordinates.get() ? playerZ : 0;
         startPos = new BlockPos(playerX + radius, upperHeightLimit, playerZ + radius);
         endPos = new BlockPos(playerX - radius, lowerHeightLimit, playerZ - radius);
         currentX = startPos.getX();
@@ -506,15 +511,6 @@ public class Exporter {
                 return Integer.compare(layer1Priority, layer2Priority);
             }
         };
-    }
-
-    // Translate the quad vertex positions (in place) such that the players original position is the center of the import (except for y coordinates)
-    protected void translateQuads(List<Quad> quads) {
-        for (Quad quad : quads) {
-            for (Vertex vertex : quad.getVertices()) {
-                vertex.getPosition().translate(-playerX, 0, -playerZ);
-            }
-        }
     }
 
     protected void addTask(Runnable task) throws InterruptedException {

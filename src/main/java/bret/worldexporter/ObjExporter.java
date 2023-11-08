@@ -417,12 +417,12 @@ public class ObjExporter extends Exporter {
             result.append("f ").append(vertUVIndices[0]).append('/').append(vertUVIndices[4]).append(' ');
             result.append(vertUVIndices[1]).append('/').append(vertUVIndices[5]).append(' ');
             result.append(vertUVIndices[2]).append('/').append(vertUVIndices[6]).append(' ');
-            result.append(vertUVIndices[3]).append('/').append(vertUVIndices[7]).append("\n\n");
+            result.append(vertUVIndices[3]).append('/').append(vertUVIndices[7]).append('\n');
         } else {
             result.append("f ").append(vertUVIndices[0]).append(' ');
             result.append(vertUVIndices[1]).append(' ');
             result.append(vertUVIndices[2]).append(' ');
-            result.append(vertUVIndices[3]).append("\n\n");
+            result.append(vertUVIndices[3]).append('\n');
         }
 
         return result.toString();

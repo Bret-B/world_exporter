@@ -145,7 +145,7 @@ class ExporterRunnable implements Runnable {
                     int i = WorldRenderer.getLightColor(exporter.world, tileentity.getBlockPos());
                     if (tileEntityRenderer != null) {
                         matrixStack.pushPose();
-                        matrixStack.translate(pos.getX(), pos.getY(), pos.getZ());
+                        matrixStack.translate(pos.getX() - exporter.playerXOffset, pos.getY(), pos.getZ() - exporter.playerZOffset);
                         RunnableFuture<Boolean> renderTileEntity = new FutureTask<>(() -> {
                             tileEntityRenderer.render(tileentity, partialTicks, matrixStack, impl, i, OverlayTexture.NO_OVERLAY);
                             return true;
@@ -190,14 +190,14 @@ class ExporterRunnable implements Runnable {
                     BitSet forceRender = exporter.getForcedDirections(pos);
                     BufferBuilder bufferbuilder = impl.getBuffer(rendertype);  // automatically starts buffer
                     try {
-                        exporter.blockRendererDispatcher.renderLiquid(pos, exporter.world, bufferbuilder, fluidState, 0, 0, forceRender);
+                        exporter.blockRendererDispatcher.renderLiquid(pos, exporter.world, bufferbuilder, fluidState, exporter.playerXOffset, exporter.playerZOffset, forceRender);
                     } catch (Throwable e) {
                         LOGGER.warn("Unable to render fluid block '" + fluidState.getType().getBucket() + "' at " + pos);
                     }
                 }
                 if (state.getRenderShape() != BlockRenderType.INVISIBLE && RenderTypeLookup.canRenderInLayer(state, rendertype)) {
                     matrixStack.pushPose();
-                    matrixStack.translate(pos.getX(), pos.getY(), pos.getZ());
+                    matrixStack.translate(pos.getX() - exporter.playerXOffset, pos.getY(), pos.getZ() - exporter.playerZOffset);
                     BitSet forceRender = exporter.getForcedDirections(pos);
                     BufferBuilder bufferbuilder = impl.getBuffer(rendertype);   // automatically starts buffer
                     try {
@@ -229,8 +229,8 @@ class ExporterRunnable implements Runnable {
                 matrixStack.pushPose();
                 int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright
                 RunnableFuture<Boolean> renderEntity = new FutureTask<>(() -> {
-                    exporter.mc.getEntityRenderDispatcher().render(entity, entity.getX(), entity.getY(), entity.getZ(), entity.yRot,
-                            partialTicks, matrixStack, impl, packedLight);
+                    exporter.mc.getEntityRenderDispatcher().render(entity, entity.getX() - exporter.playerXOffset, entity.getY(),
+                            entity.getZ() - exporter.playerZOffset, entity.yRot, partialTicks, matrixStack, impl, packedLight);
                     return true;
                 });
                 try {
@@ -286,11 +286,6 @@ class ExporterRunnable implements Runnable {
         if (exporter.optimizeMesh) {
             MeshOptimizer meshOptimizer = new MeshOptimizer();
             quads = meshOptimizer.optimize(quads);
-        }
-
-        // translate quads so that the player x,z are the origin
-        if (WorldExporterConfig.CLIENT.relativeCoordinates.get()) {
-            exporter.translateQuads(quads);
         }
 
         return quads;
