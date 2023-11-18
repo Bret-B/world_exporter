@@ -3,9 +3,12 @@ package bret.worldexporter;
 import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
+import bret.worldexporter.util.ReflectionHandler;
 import com.mojang.blaze3d.matrix.MatrixStack;
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockRenderType;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.LeavesBlock;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.RenderType;
@@ -18,6 +21,7 @@ import net.minecraft.client.renderer.vertex.VertexFormat;
 import net.minecraft.client.renderer.vertex.VertexFormatElement;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.fluid.Fluid;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.inventory.container.PlayerContainer;
 import net.minecraft.tileentity.TileEntity;
@@ -32,6 +36,7 @@ import net.minecraftforge.client.model.data.IModelData;
 import org.apache.commons.lang3.tuple.Pair;
 import org.lwjgl.opengl.GL11;
 
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
@@ -62,7 +67,11 @@ class ExporterRunnable implements Runnable {
     private BlockPos lastFallbackBlock;
     private UUID lastFallbackEntityUUID;
     private boolean lastFallbackIsBlock;
+    private final boolean renderCutout;
+    private final Map<net.minecraftforge.registries.IRegistryDelegate<Block>, java.util.function.Predicate<RenderType>> blockRenderChecks;
+    private final Map<net.minecraftforge.registries.IRegistryDelegate<Fluid>, java.util.function.Predicate<RenderType>> fluidRenderChecks;
 
+    @SuppressWarnings("unchecked")
     public ExporterRunnable(Exporter exporter, Collection<Pair<BlockPos, BlockPos>> chunkBoundaries,
                             boolean threaded, Consumer<ArrayList<ExportChunk>> chunkConsumer, int chunksPerConsume) {
         this.exporter = exporter;
@@ -71,6 +80,21 @@ class ExporterRunnable implements Runnable {
         this.chunkConsumer = chunkConsumer;
         this.chunksPerConsume = chunksPerConsume;
         impl = new CustomImpl(this);
+        renderCutout = Minecraft.useFancyGraphics();
+
+        try {
+            Field fluidChecks = Objects.requireNonNull(ReflectionHandler.getField(RenderTypeLookup.class, "fluidRenderChecks"));
+            Map<net.minecraftforge.registries.IRegistryDelegate<Fluid>, java.util.function.Predicate<RenderType>> mapFluid =
+                    (Map<net.minecraftforge.registries.IRegistryDelegate<Fluid>, java.util.function.Predicate<RenderType>>) fluidChecks.get(RenderTypeLookup.class);
+            fluidRenderChecks = new HashMap<>(mapFluid);
+
+            Field blockChecks = Objects.requireNonNull(ReflectionHandler.getField(RenderTypeLookup.class, "blockRenderChecks"));
+            Map<net.minecraftforge.registries.IRegistryDelegate<Block>, java.util.function.Predicate<RenderType>> mapBlock =
+                    (Map<net.minecraftforge.registries.IRegistryDelegate<Block>, java.util.function.Predicate<RenderType>>) blockChecks.get(RenderTypeLookup.class);
+            blockRenderChecks = new HashMap<>(mapBlock);
+        } catch (Throwable e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -113,6 +137,23 @@ class ExporterRunnable implements Runnable {
             }
         } catch (Throwable e) {
             LOGGER.warn("Unable to handle list of ExportChunks in ExporterRunnable: ", e);
+        }
+    }
+
+    private boolean canRenderInLayer(FluidState fluid, RenderType type) {
+        java.util.function.Predicate<RenderType> rendertype;
+        rendertype = fluidRenderChecks.get(fluid.getType().delegate);
+        return rendertype != null ? rendertype.test(type) : type == RenderType.solid();
+    }
+
+    private boolean canRenderInLayer(BlockState state, RenderType type) {
+        Block block = state.getBlock();
+        if (block instanceof LeavesBlock) {
+            return renderCutout ? type == RenderType.cutoutMipped() : type == RenderType.solid();
+        } else {
+            java.util.function.Predicate<RenderType> rendertype;
+            rendertype = blockRenderChecks.get(block.delegate);
+            return rendertype != null ? rendertype.test(type) : type == RenderType.solid();
         }
     }
 
@@ -186,7 +227,7 @@ class ExporterRunnable implements Runnable {
                 // The map this updates is ThreadLocal
                 ForgeHooksClient.setRenderLayer(rendertype);
 
-                if (!fluidState.isEmpty() && RenderTypeLookup.canRenderInLayer(fluidState, rendertype)) {
+                if (!fluidState.isEmpty() && canRenderInLayer(fluidState, rendertype)) {
                     BitSet forceRender = exporter.getForcedDirections(pos);
                     BufferBuilder bufferbuilder = impl.getBuffer(rendertype);  // automatically starts buffer
                     try {
@@ -195,7 +236,8 @@ class ExporterRunnable implements Runnable {
                         LOGGER.warn("Unable to render fluid block '" + fluidState.getType().getBucket() + "' at " + pos);
                     }
                 }
-                if (state.getRenderShape() != BlockRenderType.INVISIBLE && RenderTypeLookup.canRenderInLayer(state, rendertype)) {
+
+                if (state.getRenderShape() != BlockRenderType.INVISIBLE && canRenderInLayer(state, rendertype)) {
                     matrixStack.pushPose();
                     matrixStack.translate(pos.getX() - exporter.playerXOffset, pos.getY(), pos.getZ() - exporter.playerZOffset);
                     BitSet forceRender = exporter.getForcedDirections(pos);

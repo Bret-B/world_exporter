@@ -48,6 +48,7 @@ public class WorldExporterConfig {
         public final BooleanValue squareEmissivity;
         public final BooleanValue forceResourceEmissivity;
         public final BooleanValue forceOutputUniformMaps;
+        public final BooleanValue outputInvisibleFaces;
         public final DoubleValue normalStrength;
         public final DoubleValue overlapDistance;
 
@@ -119,6 +120,11 @@ public class WorldExporterConfig {
                             " Raise this if you experience z-fighting problems, but keep it as low as possible")
                     .translation("worldexporter.config.client.overlapDistance")
                     .defineInRange("overlapDistance", 0.0005, 0.0, 0.1);
+
+            outputInvisibleFaces = builder
+                    .comment("Enable to always output faces that are completely invisible/transparent")
+                    .translation("worldexporter.config.client.outputInvisibleFaces")
+                    .define("outputInvisibleFaces", true);
 
             builder.pop();
         }

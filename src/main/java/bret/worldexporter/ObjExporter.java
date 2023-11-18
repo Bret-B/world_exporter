@@ -134,7 +134,7 @@ public class ObjExporter extends Exporter {
         for (Quad quad : exportChunk.quads) {
             if (!quad.hasUV()) {
                 int color = quad.getColor();
-                if ((color & 0xFF000000) == 0) {
+                if ((color & 0xFF000000) == 0 && !WorldExporterConfig.CLIENT.outputInvisibleFaces.get()) {
                     LOGGER.warn("Skipped color-only face because it was completely transparent with color: " + Integer.toHexString(color));
                     continue;
                 }
@@ -176,9 +176,13 @@ public class ObjExporter extends Exporter {
             int modelId;
             if (!modelToIdMap.containsKey(model)) {
                 BufferedImage image = getImage(quad);
-                if (image == null || ImgUtils.isCompletelyTransparent(image)) {
-                    String reason = image == null ? " because Image was null" : " because Image was completely transparent";
-                    LOGGER.warn("Skipped face with texture: " + quad.getResource() + reason);
+                if (image == null) {
+                    LOGGER.warn("Skipped face with texture: " + quad.getResource() + " because Image was null");
+                    modelToIdMap.put(model, -1);
+                    continue;
+                }
+                if (!WorldExporterConfig.CLIENT.outputInvisibleFaces.get() && ImgUtils.isCompletelyTransparent(image)) {
+                    LOGGER.info("Skipped face with texture: " + quad.getResource() + " because Image was completely transparent");
                     modelToIdMap.put(model, -1);
                     continue;
                 }
@@ -383,7 +387,7 @@ public class ObjExporter extends Exporter {
     // returns a String of relevant .obj file lines that represent the quad
     private synchronized String quadToObj(Quad quad) {
         boolean hasUV = quad.hasUV();
-        StringBuilder result = new StringBuilder(128);
+        StringBuilder result = new StringBuilder(256);
         // loop through the quad vertices, calculating the .obj file index for position and uv coordinates
         for (int i = 0; i < 4; ++i) {
             Vertex vertex = quad.getVertices()[i];

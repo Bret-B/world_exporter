@@ -1,11 +1,9 @@
 package bret.worldexporter.util;
 
 import javax.annotation.Nullable;
-import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.awt.image.IndexColorModel;
 import java.awt.image.PixelGrabber;
-import java.awt.image.RescaleOp;
 import java.util.Arrays;
 
 public class ImgUtils {
@@ -14,15 +12,30 @@ public class ImgUtils {
         if (color == -1 || image == null) return image;
 
         // https://forge.gemwire.uk/wiki/Tinted_Textures
-        float[] offsets = new float[]{0, 0, 0, 0};
-        float[] rgbaFactors = new float[4];
-        rgbaFactors[0] = (color & 255) / 255.0f;
-        rgbaFactors[1] = ((color >> 8) & 255) / 255.0f;
-        rgbaFactors[2] = ((color >> 16) & 255) / 255.0f;
-        rgbaFactors[3] = ((color >> 24) & 255) / 255.0f;
-        RenderingHints hints = new RenderingHints(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
-        hints.add(new RenderingHints(RenderingHints.KEY_DITHERING, RenderingHints.VALUE_DITHER_DISABLE));
-        return new RescaleOp(rgbaFactors, offsets, hints).filter(image, null);
+        int[] imagePixels;
+        try {
+            imagePixels = getPixelData(image);
+        } catch (InterruptedException e) {
+            return image;
+        }
+
+        int aFactor = color >>> 24;
+        int bFactor = ((color >>> 16) & 255);
+        int gFactor = ((color >>> 8) & 255);
+        int rFactor = color & 255;
+        for (int i = 0; i < imagePixels.length; ++i) {
+            int originalPixel = imagePixels[i];
+            int newPixel = 0;
+            newPixel |= ((int) ((float) ((originalPixel & 0xFF000000) >>> 24) * aFactor / 255)) << 24;
+            newPixel |= ((int) ((float) ((originalPixel & 0xFF0000) >>> 16) * rFactor / 255)) << 16;
+            newPixel |= ((int) ((float) ((originalPixel & 0xFF00) >>> 8) * gFactor / 255)) << 8;
+            newPixel |= (int) ((float) (originalPixel & 0xFF) * bFactor / 255);
+            imagePixels[i] = newPixel;
+        }
+
+        BufferedImage tintedImage = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        tintedImage.setRGB(0, 0, image.getWidth(), image.getHeight(), imagePixels, 0, image.getWidth());
+        return tintedImage;
     }
 
     // Returns the provided image with alpha values multiplied by the [0, 1] values in transparencyData, per-pixel.

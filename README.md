@@ -27,11 +27,11 @@ When in game, run: `/worldexport {radius} {lower} {upper} {optimizeMesh} {random
 
 `randomizeTextures`: if the program should export textures exactly as they appear in Minecraft, with slight differences in textures patterning for some blocks (true/false) (optional:default=false)
 
-`threads`: how many threads to use when exporting (integer) (optional:default=4,max=8)
+`threads`: how many threads to use when exporting (integer) (optional:default=4,max=32)
 
 Using `true` for `randomizeTextures` will significantly reduce how well the mesh optimization performs due to slight differences in texture patterns between some blocks.
 
-Using a value higher than `1` for `threads` may result in a slightly higher vertex count and will require more memory.
+Using a value higher than `1` for `threads` may result in a slightly higher vertex count and will require more memory per each thread used.
 
 Example usage with default values:
 
@@ -69,7 +69,7 @@ run `/config showfile worldexporter CLIENT` to get the config location and then 
 
 ![Basement render](../assets/images/bath-basement.png?raw=true)
 
-These renders were created by Familycreature4 using both this tool and Blender.
+These renders were created by Shane-SDK using both this tool and Blender.
 
 A python script for fixing texture issues after importing into Blender can be found in the scripts folder.
 

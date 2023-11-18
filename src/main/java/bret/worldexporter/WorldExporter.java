@@ -90,7 +90,7 @@ public class WorldExporter {
             );
             return;
         }
-        threads = Math.max(1, Math.min(8, threads));
+        threads = Math.max(1, Math.min(32, threads));
 
         ObjExporter objExporter = new ObjExporter(player, radius, lower, upper, optimizeMesh, randomizeTextureOrientation, threads);
         boolean success;
@@ -98,7 +98,7 @@ public class WorldExporter {
             success = objExporter.export("world", "world_materials");
         } catch (OutOfMemoryError e) {
             player.sendMessage(new StringTextComponent("Ran out of memory while exporting. " +
-                            "Allocate more memory to Minecraft and try again."),
+                            "Allocate more memory to Minecraft or reduce the number of export threads and try again."),
                     Util.NIL_UUID
             );
             System.gc();
@@ -114,7 +114,6 @@ public class WorldExporter {
         System.gc();
     }
 
-    // TODO: add to README documentation
     private static void keepRadius(String msg, ClientWorld world, ClientPlayerEntity player) {
         try {
             int newRadius = Integer.parseInt(msg.substring(CMD_RADIUS.length()).trim());
