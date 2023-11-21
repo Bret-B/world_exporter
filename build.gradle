@@ -171,19 +171,22 @@ dependencies {
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
 
     // For CodeChickenLib + running dev environment with other mods
-    // compileOnly fileTree(dir: "libs", include: "**/*.jar")  // ?
-    runtimeOnly fg.deobf("codechicken:CodeChickenLib:1.16.5-4.0.7.445-universal")
-    runtimeOnly fg.deobf("framedblocks:FramedBlocks:2.16.1")
-    runtimeOnly fg.deobf("cofh:cofh_core:1.16.5-1.5.0.11")
-    runtimeOnly fg.deobf("thermalexpansion:thermal_expansion:1.16.5-1.5.0.7")
-    runtimeOnly fg.deobf("thermalexpansion:thermal_cultivation:1.16.5-1.5.0.4")
-    runtimeOnly fg.deobf("thermalexpansion:thermal_foundation:1.16.5-1.5.0.14")
-    runtimeOnly fg.deobf("thermalexpansion:thermal_innovation:1.16.5-1.5.0.4")
-    runtimeOnly fg.deobf("thermalexpansion:thermal_locomotion:1.16.5-1.5.0.4")
-    runtimeOnly fg.deobf("thermalexpansion:thermal_locomotion:1.16.5-1.5.0.4")
-    runtimeOnly fg.deobf("ctm:CTM:MC1.16.1-1.1.2.6")
-    runtimeOnly fg.deobf("zycraft:ZYCraft:1.16.5-3.1.34")
-    runtimeOnly fg.deobf("configured:configured:1.5.2-1.16.5")
+    // fileTree does not seem to work
+//    runtimeOnly fg.deobf("codechicken:CodeChickenLib:1.16.5-4.0.7.445-universal")
+//    runtimeOnly fg.deobf("framedblocks:FramedBlocks:2.16.1")
+//    runtimeOnly fg.deobf("cofh:cofh_core:1.16.5-1.5.0.11")
+//    runtimeOnly fg.deobf("thermalexpansion:thermal_expansion:1.16.5-1.5.0.7")
+//    runtimeOnly fg.deobf("thermalexpansion:thermal_cultivation:1.16.5-1.5.0.4")
+//    runtimeOnly fg.deobf("thermalexpansion:thermal_foundation:1.16.5-1.5.0.14")
+//    runtimeOnly fg.deobf("thermalexpansion:thermal_innovation:1.16.5-1.5.0.4")
+//    runtimeOnly fg.deobf("thermalexpansion:thermal_locomotion:1.16.5-1.5.0.4")
+//    runtimeOnly fg.deobf("thermalexpansion:thermal_locomotion:1.16.5-1.5.0.4")
+//    runtimeOnly fg.deobf("ctm:CTM:MC1.16.1-1.1.2.6")
+//    runtimeOnly fg.deobf("zycraft:ZYCraft:1.16.5-3.1.34")
+//    runtimeOnly fg.deobf("configured:configured:1.5.2-1.16.5")
+//    runtimeOnly fg.deobf("patchouli:Patchouli:1.16.4-53.3")
+//    runtimeOnly fg.deobf("curios:curios-forge:1.16.5-4.1.0.0")
+//    runtimeOnly fg.deobf("botania:Botania:1.16.5-420.3")
 }
 
 mixin {
