@@ -184,7 +184,8 @@ public class Exporter {
         TextureManager textureManager = Minecraft.getInstance().getTextureManager();
         Texture texture = textureManager.getTexture(resource);
         if (texture == null) {
-            // texture is not currently loaded. This can be caused by entities outside render distance
+            LOGGER.info("Loading the following resource: " + resource);
+            // The texture is not currently loaded. This can be caused by entities outside render distance for example.
             // attempt to load the texture into the texture manager (see TextureManager._bind() and register())
             Texture newTexture = new SimpleTexture(resource);
             if (threaded) {
@@ -409,7 +410,7 @@ public class Exporter {
                 int glTextureId = field.getInt(multiTex);
                 image = getAtlasSubImage(sprite, -1, glTextureId);
             } catch (Exception e) {
-                LOGGER.warn("Unable to access an optifine field: " + field + ", disabling optifine for this export.", e);
+                LOGGER.warn("Unable to access an optifine field: " + field + ", disabling optifine for this export.");
                 OptifineReflector.validOptifine = false;
             }
         } else if (quad.getTexture() != null) {
@@ -419,7 +420,7 @@ public class Exporter {
                 int glTextureId = field.getInt(multiTex);
                 image = getAtlasImage(glTextureId);
             } catch (Exception e) {
-                LOGGER.warn("Unable to access an optifine field: " + field + ", disabling optifine for this export.", e);
+                LOGGER.warn("Unable to access an optifine field: " + field + ", disabling optifine for this export.");
                 OptifineReflector.validOptifine = false;
             }
         }
@@ -443,7 +444,10 @@ public class Exporter {
         if (baseImage == null) return null;
 
         uvbound = uvbound.clamped();
-        if (uvbound.uDist() <= 0.000001f || uvbound.vDist() <= 0.000001f) return null;
+        if (uvbound.uDist() <= 0.000001f || uvbound.vDist() <= 0.000001f) {
+            LOGGER.warn("Could not determine texture image from UV since the distances were so small: ");
+            return null;
+        }
 
         int width = Math.max(1, Math.round(baseImage.getWidth() * uvbound.uDist()));
         int height = Math.max(1, Math.round(baseImage.getHeight() * uvbound.vDist()));

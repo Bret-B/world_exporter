@@ -108,10 +108,9 @@ public class WorldExporter {
             success = false;
         }
 
-        if (!success) {
-            player.sendMessage(new StringTextComponent("An error occurred when exporting the world."), Util.NIL_UUID);
-        }
         System.gc();
+        player.sendMessage(new StringTextComponent(
+                success ? "Export successful." : "An error occurred when exporting the world."), Util.NIL_UUID);
     }
 
     private static void keepRadius(String msg, ClientWorld world, ClientPlayerEntity player) {

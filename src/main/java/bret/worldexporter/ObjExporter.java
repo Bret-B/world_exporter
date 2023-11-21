@@ -222,7 +222,8 @@ public class ObjExporter extends Exporter {
                         try {
                             mtlWriter.write("map_Ke " + emissiveTextureName + '\n');
                             modelToEmissiveMap.put(model, emissiveTextureName);
-                        } catch (IOException ignored) {
+                        } catch (IOException e) {
+                            LOGGER.error("Failed to write emissive data for texture: " + emissiveTextureName, e);
                         }
                     }
                 };

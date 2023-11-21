@@ -23,7 +23,6 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.fluid.Fluid;
 import net.minecraft.fluid.FluidState;
-import net.minecraft.inventory.container.PlayerContainer;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.AxisAlignedBB;
@@ -48,9 +47,9 @@ import java.util.stream.Collectors;
 import static bret.worldexporter.Exporter.LOGGER;
 
 class ExporterRunnable implements Runnable {
-    private final Map<RenderType, Map<BlockPos, Pair<Integer, Integer>>> layerPosVerticesMap = new HashMap<>();
+    protected final Map<RenderType, Map<BlockPos, Pair<Integer, Integer>>> layerPosVertexCountsMap = new HashMap<>();
+    protected final Map<RenderType, Map<UUID, Pair<Integer, Integer>>> layerUUIDVertexCountsMap = new HashMap<>();
     private final Map<BlockPos, ArrayList<Quad>> blockQuadsMap = new HashMap<>();
-    private final Map<RenderType, Map<UUID, Pair<Integer, Integer>>> layerUUIDVerticesMap = new HashMap<>();
     private final Map<UUID, ArrayList<Quad>> entityUUIDQuadsMap = new HashMap<>();
     private final Map<BlockPos, Integer> blockLightValuesMap = new HashMap<>();
     private final Map<RenderType, ResourceLocation> renderResourceLocationMap = new HashMap<>();
@@ -157,8 +156,12 @@ class ExporterRunnable implements Runnable {
         }
     }
 
+    private void ensureEmptyMatrixStack(MatrixStack matrixStack) {
+        while (!matrixStack.clear()) matrixStack.popPose();
+    }
+
     private ArrayList<Quad> getNextChunkData(BlockPos start, BlockPos end) {
-        resetBuilders();
+        reset();
         ArrayList<Quad> quads = new ArrayList<>();
         Chunk chunk = exporter.world.getChunkAt(start);
         if (chunk.isEmpty()) return quads;
@@ -180,7 +183,7 @@ class ExporterRunnable implements Runnable {
             }
 
             if (state.hasTileEntity()) {
-                TileEntity tileentity = exporter.world.getChunkAt(pos).getBlockEntity(pos);
+                TileEntity tileentity = exporter.world.getChunkAt(pos).getBlockEntity(pos, Chunk.CreateEntityType.CHECK);
                 if (tileentity != null) {
                     TileEntityRenderer<TileEntity> tileEntityRenderer = TileEntityRendererDispatcher.instance.getRenderer(tileentity);
                     int i = WorldRenderer.getLightColor(exporter.world, tileentity.getBlockPos());
@@ -211,7 +214,7 @@ class ExporterRunnable implements Runnable {
                             }
                         }
 
-                        matrixStack.popPose();
+                        ensureEmptyMatrixStack(matrixStack);
                     }
                 }
             }
@@ -248,13 +251,7 @@ class ExporterRunnable implements Runnable {
                         LOGGER.warn("Unable to render block '" + state + "' at " + pos, e);
                     }
 
-                    // TODO: useful?
-//                    if (state.getRenderShape() == BlockRenderType.ENTITYBLOCK_ANIMATED && modelData != null) {
-//                        int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright
-//                        exporter.blockRendererDispatcher.renderBlock(state, matrixStack, impl, packedLight, OverlayTexture.NO_OVERLAY, modelData);
-//                    }
-
-                    matrixStack.popPose();
+                    ensureEmptyMatrixStack(matrixStack);
                 }
             }
             ForgeHooksClient.setRenderLayer(null);
@@ -296,17 +293,13 @@ class ExporterRunnable implements Runnable {
                         LOGGER.error("Unknown error while exporting entity on main thread: " + entity + '\n', e);
                     }
                 }
-                matrixStack.popPose();
+                ensureEmptyMatrixStack(matrixStack);
                 postCountLayerVertices();
             }
         }
 
-        // finish all builders that were drawing, then add the data
+        // finish all builders that were drawing and add the remaining data, if any
         impl.endBatch();
-        if (impl.builder.building()) {
-            fallbackBufferCallback();
-        }
-        addAllFinishedData();
         updateQuadTextures();
 
         // update light values for quads that originate from a block
@@ -333,70 +326,18 @@ class ExporterRunnable implements Runnable {
         return quads;
     }
 
-    private void resetBuilders() {
-        for (RenderType type : layerPosVerticesMap.keySet()) {
-            BufferBuilder buf = impl.getBuilderRaw(type);
-            if (buf.building()) buf.end();
-            buf.discard();
-        }
-
-        for (RenderType type : layerUUIDVerticesMap.keySet()) {
-            BufferBuilder buf = impl.getBuilderRaw(type);
-            if (buf.building()) buf.end();
-            buf.discard();
-        }
-
-        if (impl.builder.building()) impl.builder.end();
-        impl.builder.discard();
-
-        impl.endBatch();
-
-        layerPosVerticesMap.clear();
+    private void reset() {
+        impl.resetAll();
+        layerPosVertexCountsMap.clear();
         blockQuadsMap.clear();
-        layerUUIDVerticesMap.clear();
+        layerUUIDVertexCountsMap.clear();
         entityUUIDQuadsMap.clear();
         impl.clearVerticesCounts();
         blockLightValuesMap.clear();
     }
 
-    private void addAllFinishedData() {
-        Set<RenderType> allTypes = new HashSet<>(layerPosVerticesMap.keySet());
-        allTypes.addAll(layerUUIDVerticesMap.keySet());
-
-        for (RenderType type : allTypes) {
-            BufferBuilder bufferBuilder = impl.getBuilderRaw(type);
-            com.mojang.datafixers.util.Pair<BufferBuilder.DrawState, ByteBuffer> stateBufferPair = bufferBuilder.popNextBuffer();
-            BufferBuilder.DrawState drawState = stateBufferPair.getFirst();
-            VertexFormat format = type.format();
-            if (drawState.vertexCount() == 0 || drawState.mode() != GL11.GL_QUADS || !Exporter.supportedVertexFormat(format)) {
-                if (drawState.vertexCount() != 0) {
-                    LOGGER.debug("A rendertype VertexFormat was not supported: " + type + '\n' + format + '\n' + format.getElements()
-                            + '\n' + "Using GL drawstate ID: " + drawState.mode());
-                }
-                continue;
-            }
-
-            ByteBuffer bytebuffer = stateBufferPair.getSecond();
-            for (BlockPos pos : layerPosVerticesMap.getOrDefault(type, Collections.emptyMap()).keySet()) {
-                Pair<Integer, Integer> verticesPosCount = layerPosVerticesMap.get(type).get(pos);
-                int firstVertexBytePos = verticesPosCount.getLeft() * type.format().getVertexSize();
-                int vertexCount = verticesPosCount.getRight();
-                ArrayList<Quad> quadsList = blockQuadsMap.computeIfAbsent(pos, k -> new ArrayList<>());
-                addVertices(bytebuffer, type.format().getElements(), quadsList, type, firstVertexBytePos, vertexCount);
-            }
-
-            for (UUID uuid : layerUUIDVerticesMap.getOrDefault(type, Collections.emptyMap()).keySet()) {
-                Pair<Integer, Integer> verticesPosCount = layerUUIDVerticesMap.get(type).get(uuid);
-                int firstVertexBytePos = verticesPosCount.getLeft() * type.format().getVertexSize();
-                int vertexCount = verticesPosCount.getRight();
-                ArrayList<Quad> quadsList = entityUUIDQuadsMap.computeIfAbsent(uuid, k -> new ArrayList<>());
-                addVertices(bytebuffer, type.format().getElements(), quadsList, type, firstVertexBytePos, vertexCount);
-            }
-        }
-    }
-
     private void addVertices(ByteBuffer bytebuffer, List<VertexFormatElement> list, ArrayList<Quad> quadsList, RenderType type, int vertexStartIndex, int vertexCount) {
-        ResourceLocation resource = renderResourceLocationMap.getOrDefault(type, PlayerContainer.BLOCK_ATLAS);
+        ResourceLocation resource = renderResourceLocationMap.getOrDefault(type, MissingTextureSprite.getLocation());
         Quad quad = new Quad(type, resource);
         boolean skipQuad = false;
         bytebuffer.position(vertexStartIndex);
@@ -481,9 +422,9 @@ class ExporterRunnable implements Runnable {
             RenderType type = entry.getKey();
 
             if (lastFixedIsBlock) {
-                layerPosVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastFixedBlock, entry.getValue());
+                layerPosVertexCountsMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastFixedBlock, entry.getValue());
             } else {
-                layerUUIDVerticesMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastFixedEntityUUID, entry.getValue());
+                layerUUIDVertexCountsMap.computeIfAbsent(type, k -> new HashMap<>()).put(lastFixedEntityUUID, entry.getValue());
             }
         }
     }
@@ -504,31 +445,71 @@ class ExporterRunnable implements Runnable {
         lastFallbackEntityUUID = lastFixedEntityUUID;
     }
 
+    // This must not be used with a non-fixed RenderType (fallback type).
+    // This will be called on every fixed buffer RenderType when endBatch() is called, but this
+    // exists just in case a fixed buffer is ended at some point during rendering
+    protected void fixedBufferCallback(RenderType type) {
+        BufferBuilder bufferBuilder = impl.getBuilderRaw(type);
+        bufferBuilder.end();
+        com.mojang.datafixers.util.Pair<BufferBuilder.DrawState, ByteBuffer> stateBufferPair = bufferBuilder.popNextBuffer();
+        BufferBuilder.DrawState drawState = stateBufferPair.getFirst();
+        VertexFormat format = type.format();
+        if (drawState.vertexCount() == 0) {
+            return;
+        }
+        if (drawState.mode() != GL11.GL_QUADS || !Exporter.supportedVertexFormat(format)) {
+            LOGGER.warn("A rendertype VertexFormat was not supported: " + type + '\n' + format + '\n' + format.getElements()
+                    + '\n' + "Using GL drawstate ID: " + drawState.mode());
+            return;
+        }
+
+        ByteBuffer bytebuffer = stateBufferPair.getSecond();
+        for (BlockPos pos : layerPosVertexCountsMap.getOrDefault(type, Collections.emptyMap()).keySet()) {
+            Pair<Integer, Integer> verticesPosCount = layerPosVertexCountsMap.get(type).get(pos);
+            int firstVertexBytePos = verticesPosCount.getLeft() * type.format().getVertexSize();
+            int vertexCount = verticesPosCount.getRight();
+            ArrayList<Quad> quadsList = blockQuadsMap.computeIfAbsent(pos, k -> new ArrayList<>());
+            addVertices(bytebuffer, type.format().getElements(), quadsList, type, firstVertexBytePos, vertexCount);
+        }
+
+        for (UUID uuid : layerUUIDVertexCountsMap.getOrDefault(type, Collections.emptyMap()).keySet()) {
+            Pair<Integer, Integer> verticesPosCount = layerUUIDVertexCountsMap.get(type).get(uuid);
+            int firstVertexBytePos = verticesPosCount.getLeft() * type.format().getVertexSize();
+            int vertexCount = verticesPosCount.getRight();
+            ArrayList<Quad> quadsList = entityUUIDQuadsMap.computeIfAbsent(uuid, k -> new ArrayList<>());
+            addVertices(bytebuffer, type.format().getElements(), quadsList, type, firstVertexBytePos, vertexCount);
+        }
+
+        bufferBuilder.discard();
+    }
+
     protected void fallbackBufferCallback() {
         impl.builder.end();
         com.mojang.datafixers.util.Pair<BufferBuilder.DrawState, ByteBuffer> stateBufferPair = impl.builder.popNextBuffer();
-        impl.builder.discard();
         BufferBuilder.DrawState drawState = stateBufferPair.getFirst();
         ByteBuffer bytebuffer = stateBufferPair.getSecond();
 
-        if (drawState.vertexCount() == 0 || drawState.mode() != GL11.GL_QUADS || !Exporter.supportedVertexFormat(drawState.format())) {
-            if (drawState.vertexCount() != 0) {
-                LOGGER.debug("A rendertype VertexFormat was not supported: " + drawState.format() + '\n' + drawState.format().getElements()
-                        + '\n' + "Using GL drawstate ID: " + drawState.mode());
-            }
+        if (drawState.vertexCount() == 0) {
+            return;
+        }
+        if (drawState.mode() != GL11.GL_QUADS || !Exporter.supportedVertexFormat(drawState.format())) {
+            LOGGER.warn("A rendertype VertexFormat was not supported: " + drawState.format() + '\n' + drawState.format().getElements()
+                    + '\n' + "Using GL drawstate ID: " + drawState.mode());
             return;
         }
 
         ArrayList<Quad> quadList;
         if (lastFallbackIsBlock && lastFallbackBlock != null) {
             quadList = blockQuadsMap.computeIfAbsent(lastFallbackBlock, k -> new ArrayList<>());
-        } else if (lastFallbackEntityUUID != null) {
+        } else if (!lastFallbackIsBlock && lastFallbackEntityUUID != null) {
             quadList = entityUUIDQuadsMap.computeIfAbsent(lastFallbackEntityUUID, k -> new ArrayList<>());
         } else {
+            LOGGER.warn("fallbackBufferCallback called, but no block or entity could be matched with the quads.");
             return;
         }
 
         addVertices(bytebuffer, impl.builder.getVertexFormat().getElements(), quadList, impl.lastState.orElse(null), 0, drawState.vertexCount());
+        impl.builder.discard();
     }
 
     // For every quad: if its texture refers to an atlasImage, update its texture resourceLocation, add a reference to its sprite,
@@ -561,6 +542,9 @@ class ExporterRunnable implements Runnable {
                     }
                     quad.setSprite(sprite);
                     didModifyUV = true;
+                } else {
+                    LOGGER.warn("Unable to determine where on atlas " + ((AtlasTexture) baseTexture).location() +
+                            " the texture is with the following UVs: " + quad.getUvBounds());
                 }
             } else if (baseTexture instanceof DynamicTexture) {
                 NativeImage quadImage = ((DynamicTexture) baseTexture).getPixels();

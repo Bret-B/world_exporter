@@ -51,6 +51,11 @@ public class UVBounds {
         return Objects.hash(uMin, uMax, vMin, vMax);
     }
 
+    @Override
+    public String toString() {
+        return "uMin: " + uMin + ", uMax: " + uMax + ", vMin: " + vMin + ", vMax: " + vMax;
+    }
+
     public float uDist() {
         return uMax - uMin;
     }

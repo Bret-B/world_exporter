@@ -10,6 +10,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.apache.commons.lang3.tuple.Pair;
 
+import javax.annotation.Nonnull;
 import java.util.*;
 
 @OnlyIn(Dist.CLIENT)
@@ -20,6 +21,7 @@ public class CustomImpl implements IRenderTypeBuffer {
     private final ExporterRunnable thread;
     // keeps track of vertexCounts for used buffers (updated when a new buffer is pulled from getBuffer)
     private final Map<RenderType, Integer> typeUsedVertices;
+    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
     public Optional<RenderType> lastState = Optional.empty();
 
     public CustomImpl(ExporterRunnable thread) {
@@ -64,11 +66,14 @@ public class CustomImpl implements IRenderTypeBuffer {
         pMapBuilders.put(pRenderType, new BufferBuilder(pRenderType.bufferSize()));
     }
 
+    @Nonnull
     public BufferBuilder getBuffer(RenderType p_getBuffer_1_) {
         Optional<RenderType> optional = p_getBuffer_1_.asOptional();
         BufferBuilder bufferbuilder = this.getBuilderRaw(p_getBuffer_1_);
         if (!Objects.equals(this.lastState, optional)) {
             if (this.lastState.isPresent()) {
+                // If the last state was using the fallback buffer and this getBuffer call is not using the
+                // fallback buffer with the same render type, end the fallback buffer
                 RenderType rendertype = this.lastState.get();
                 if (!this.fixedBuffers.containsKey(rendertype)) {
                     this.endBatch(rendertype);
@@ -78,7 +83,7 @@ public class CustomImpl implements IRenderTypeBuffer {
             if (this.startedBuffers.add(bufferbuilder)) {
                 bufferbuilder.begin(p_getBuffer_1_.mode(), p_getBuffer_1_.format());
                 if (bufferbuilder == this.builder) {
-                    thread.setLastFallbackInfo();
+                    this.thread.setLastFallbackInfo();
                 }
             }
 
@@ -88,7 +93,7 @@ public class CustomImpl implements IRenderTypeBuffer {
         // Update pre vertices count for previously uncounted buffer. Does nothing if it already has a count
         // fallback builder does not require counts to be updated since it uses the DrawState count
         if (bufferbuilder != this.builder) {
-            typeUsedVertices.putIfAbsent(p_getBuffer_1_, bufferbuilder.vertices);
+            this.typeUsedVertices.putIfAbsent(p_getBuffer_1_, bufferbuilder.vertices);
         }
 
         return bufferbuilder;
@@ -97,18 +102,18 @@ public class CustomImpl implements IRenderTypeBuffer {
     // returns map of a RenderType to the pre- and post-counts of vertices for that RenderType since the last call to this function
     public Map<RenderType, Pair<Integer, Integer>> getClearVerticesCounts() {
         Map<RenderType, Pair<Integer, Integer>> counts = new HashMap<>();
-        for (RenderType type : typeUsedVertices.keySet()) {
-            int preCount = typeUsedVertices.get(type);
+        for (RenderType type : this.typeUsedVertices.keySet()) {
+            int preCount = this.typeUsedVertices.get(type);
             int count = getBuilderRaw(type).vertices - preCount;
             if (count == 0) continue;
             counts.put(type, Pair.of(preCount, count));
         }
-        typeUsedVertices.clear();
+        this.typeUsedVertices.clear();
         return counts;
     }
 
     public void clearVerticesCounts() {
-        typeUsedVertices.clear();
+        this.typeUsedVertices.clear();
     }
 
     public BufferBuilder getBuilderRaw(RenderType pRenderType) {
@@ -119,19 +124,17 @@ public class CustomImpl implements IRenderTypeBuffer {
         this.lastState.ifPresent((renderType) -> {
             IVertexBuilder ivertexbuilder = this.getBuffer(renderType);
             if (ivertexbuilder == this.builder) {
-                this.endBatch(renderType);
+                this.endBatch(renderType);  // end the fallback buffer if needed
             }
         });
 
-        for (RenderType rendertype : this.fixedBuffers.keySet()) {
-            this.endBatch(rendertype);
-        }
+        this.fixedBuffers.keySet().forEach(this::endBatch);  // end all fixed buffers
     }
 
     public void endBatch(RenderType pRenderType) {
         BufferBuilder bufferbuilder = this.getBuilderRaw(pRenderType);
-        boolean flag = Objects.equals(this.lastState, pRenderType.asOptional());
-        if (flag || bufferbuilder != this.builder) {
+        boolean endingLastUsedType = Objects.equals(this.lastState, pRenderType == null ? Optional.empty() : pRenderType.asOptional());
+        if (endingLastUsedType || bufferbuilder != this.builder) {
             if (this.startedBuffers.remove(bufferbuilder)) {
                 // replace typical RenderType.end() behavior
                 // pRenderType.end(bufferbuilder, 0, 0, 0);
@@ -141,23 +144,38 @@ public class CustomImpl implements IRenderTypeBuffer {
                         RenderType.Type renderTypeExtended = (RenderType.Type) pRenderType;
                         RenderType.State renderState = renderTypeExtended.state;
                         renderState.textureState.texture.ifPresent(resourceLocation ->
-                                thread.putResource(pRenderType, resourceLocation)
+                                this.thread.putResource(pRenderType, resourceLocation)
                         );
                     }
+                    // some custom modded subclasses of RenderType include their RenderType.Type in another field
+                    // (or potentially not at all)
+//                    else {
+//                        ;
+//                    }
 
+                    // Both the fallback and fixed buffers process their data immediately when the batch is ended
+                    // Both callbacks should call end on the buffer before consuming the data
                     if (bufferbuilder == this.builder) {
-                        // If the buffer being finished is the fallback buffer, the data needs to be processed immediately before it is overwritten/finished
-                        // The callback function should call finishDrawing on the buffer before consuming the data
-                        thread.fallbackBufferCallback();
+                        this.thread.fallbackBufferCallback();
                     } else {
-                        bufferbuilder.end();
+                        this.thread.fixedBufferCallback(pRenderType);
+                        this.typeUsedVertices.remove(pRenderType);
+                        this.thread.layerPosVertexCountsMap.remove(pRenderType);
+                        this.thread.layerUUIDVertexCountsMap.remove(pRenderType);
                     }
                 }
 
-                if (flag) {
+                if (endingLastUsedType) {
                     this.lastState = Optional.empty();
                 }
             }
         }
+    }
+
+    public void resetAll() {
+        endBatch();
+        this.builder.discard();
+        this.fixedBuffers.keySet().forEach((RenderType type) -> this.getBuilderRaw(type).discard());
+        this.startedBuffers.clear();  // just in case
     }
 }
