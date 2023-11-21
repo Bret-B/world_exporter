@@ -35,4 +35,8 @@ public class ReflectionHandler {
             return null;
         }
     }
+
+    public static Field[] getDeclaredFields(Object object) {
+        return object.getClass().getDeclaredFields();
+    }
 }

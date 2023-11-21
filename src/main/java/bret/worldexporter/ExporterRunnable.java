@@ -544,7 +544,8 @@ class ExporterRunnable implements Runnable {
                     didModifyUV = true;
                 } else {
                     LOGGER.warn("Unable to determine where on atlas " + ((AtlasTexture) baseTexture).location() +
-                            " the texture is with the following UVs: " + quad.getUvBounds());
+                            " the texture is with the following UVs: " + quad.getUvBounds() +
+                            ", derived from from ResourceLocation " + quad.getResource());
                 }
             } else if (baseTexture instanceof DynamicTexture) {
                 NativeImage quadImage = ((DynamicTexture) baseTexture).getPixels();

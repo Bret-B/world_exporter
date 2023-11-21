@@ -1,5 +1,6 @@
 package bret.worldexporter;
 
+import bret.worldexporter.util.RenderTypeFinder;
 import com.google.common.collect.Sets;
 import com.mojang.blaze3d.vertex.IVertexBuilder;
 import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
@@ -12,6 +13,8 @@ import org.apache.commons.lang3.tuple.Pair;
 
 import javax.annotation.Nonnull;
 import java.util.*;
+
+import static bret.worldexporter.Exporter.LOGGER;
 
 @OnlyIn(Dist.CLIENT)
 public class CustomImpl implements IRenderTypeBuffer {
@@ -140,18 +143,24 @@ public class CustomImpl implements IRenderTypeBuffer {
                 // pRenderType.end(bufferbuilder, 0, 0, 0);
 
                 if (bufferbuilder.building()) {
+                    RenderType.Type renderTypeExtended;
                     if (pRenderType instanceof RenderType.Type) {
-                        RenderType.Type renderTypeExtended = (RenderType.Type) pRenderType;
+                        renderTypeExtended = (RenderType.Type) pRenderType;
+                    } else {
+                        // some modded subclasses of RenderType include their RenderType.Type in another field
+                        // (or potentially not at all), so try to find it in some nested field
+                        renderTypeExtended = RenderTypeFinder.findNestedType(pRenderType, 4);
+                    }
+
+                    if (renderTypeExtended != null) {
                         RenderType.State renderState = renderTypeExtended.state;
                         renderState.textureState.texture.ifPresent(resourceLocation ->
                                 this.thread.putResource(pRenderType, resourceLocation)
                         );
+                    } else {
+                        LOGGER.warn("Could not find associated texture ResourceLocation for RenderType class: " +
+                                (pRenderType == null ? "null" : pRenderType.getClass()));
                     }
-                    // some custom modded subclasses of RenderType include their RenderType.Type in another field
-                    // (or potentially not at all)
-//                    else {
-//                        ;
-//                    }
 
                     // Both the fallback and fixed buffers process their data immediately when the batch is ended
                     // Both callbacks should call end on the buffer before consuming the data
