@@ -217,22 +217,20 @@ public class Quad {
         if (texture != quad.texture) return false;
         if (lightValue != quad.lightValue) return false;
         if (sprite != quad.sprite) return false;
+        if (!Objects.equals(uvBounds, quad.uvBounds)) return false;
+        boolean[] vertexWasUsedForPosEquivalence = new boolean[quad.count];
         for (int i = 0; i < count; ++i) {
             boolean hasEquivalence = false;
-            boolean hasUvEquivalence = false;
             Vertex v1 = vertices[i];
             for (int j = 0; j < quad.count; ++j) {
-                if (Objects.equals(v1.getPosition(), quad.vertices[j].getPosition()) && v1.getColor() == quad.vertices[j].getColor()) {
-//                        && v1.getUvlight().equals(quad.vertices[j].getUvlight())) {
+                if (!vertexWasUsedForPosEquivalence[j]
+                        && Objects.equals(v1.getPosition(), quad.vertices[j].getPosition())
+                        && v1.getColor() == quad.vertices[j].getColor()) {
                     hasEquivalence = true;
-                }
-
-                if (Objects.equals(v1.getUv(), quad.vertices[j].getUv())) {
-                    hasUvEquivalence = true;
+                    vertexWasUsedForPosEquivalence[j] = true;
                 }
             }
             if (!hasEquivalence) return false;
-            if (!hasUvEquivalence) return false;
         }
         return true;
     }
