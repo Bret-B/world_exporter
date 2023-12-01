@@ -5,6 +5,9 @@ import bret.worldexporter.legacylwjgl.Vector3f;
 
 import java.util.*;
 
+import static bret.worldexporter.Exporter.LOGGER;
+import static java.lang.Math.round;
+
 public class MeshOptimizer {
     private final static int ROUND_BITS = 2;
     private static final Comparator<Quad> quadComparator = getQuadComparator();
@@ -14,12 +17,18 @@ public class MeshOptimizer {
     private static boolean canTile(Quad quad) {
         if (!quad.hasUV()) return false;
 
-        // must have UV coordinates capable of tiling (0/1)
+        // Must have UV coordinates capable of tiling (0/1) in one or both directions.
+        // It is possible to tile two quads with different UV's as long as their minimum is 0 and
+        // their maximum is an integer.
+        // For example, a quad with U coordinates of 0, 1 could be combined with a quad with 0, 4 (assuming that
+        // their differences in physical length correlate with their differences in UV coordinates).
+        // However, I haven't seen a single case where this actually shows up or would be useful.
         UVBounds uvbounds = quad.getUvBounds();
-        if (!floatEq(uvbounds.uMin, 0.0f, ROUND_BITS)) return false;
-        if (!floatEq(uvbounds.uMax, 1.0f, ROUND_BITS)) return false;
-        if (!floatEq(uvbounds.vMin, 0.0f, ROUND_BITS)) return false;
-        if (!floatEq(uvbounds.vMax, 1.0f, ROUND_BITS)) return false;
+        boolean tileableU = floatEq(uvbounds.uMin, 0.0f, ROUND_BITS)
+                && floatEq(uvbounds.uMax, 1.0f, ROUND_BITS);
+        boolean tileableV = floatEq(uvbounds.vMin, 0.0f, ROUND_BITS)
+                && floatEq(uvbounds.vMax, 1.0f, ROUND_BITS);
+        if (!tileableU && !tileableV) return false;
 
         // must be a rectangle (equal height/width distances between vertices, right angle corners)
         Vertex[] v = quad.getVertices();
@@ -63,7 +72,6 @@ public class MeshOptimizer {
     }
 
     // Overall approach: Loop through all quads, considering only the quads which are eligible
-    // (meaning they have uv coordinates of only 0/1 and are rectangular):
     // First, break the quads into non-overlapping subsets of quads where each quad in a subset
     // has the same texture, uv coordinates, and face normal. Then, optimize each subset by
     // merging quads that share an edge by adding the UV coordinate difference to the resulting quad UV's
@@ -196,14 +204,52 @@ public class MeshOptimizer {
         }
     }
 
+    // Only the edges for the quad parallel to its tile-able direction(s) are returned
+    //  0         1
+    //  ___________ 0.5
+    //  |         |
+    //  |_________| 0
+    // For example, only the left and right edges of the above quad would be returned
     private List<Edge> getEdges(Quad quad) {
-        Vertex[] v = quad.getVertices();
-        return Arrays.asList(
-                new Edge(v[0].getPosition(), v[1].getPosition()),
-                new Edge(v[2].getPosition(), v[3].getPosition()),
-                new Edge(v[0].getPosition(), v[3].getPosition()),
-                new Edge(v[1].getPosition(), v[2].getPosition())
-        );
+        Vertex[] vertices = quad.getVertices();
+        UVBounds uvBounds = quad.getUvBounds();
+        int minUMinV = -1, minUMaxV = -1, maxUMinV = -1, maxUMaxV = -1;
+        for (int i = 0; i < 4; i++) {
+            Vertex v = vertices[i];
+            Vector2f uv = v.getUv();
+            if (uv.x == uvBounds.uMin && uv.y == uvBounds.vMin) minUMinV = i;
+            if (uv.x == uvBounds.uMin && uv.y == uvBounds.vMax) minUMaxV = i;
+            if (uv.x == uvBounds.uMax && uv.y == uvBounds.vMin) maxUMinV = i;
+            if (uv.x == uvBounds.uMax && uv.y == uvBounds.vMax) maxUMaxV = i;
+        }
+
+        if (minUMinV == -1 || minUMaxV == -1 || maxUMinV == -1 || maxUMaxV == -1) {
+            LOGGER.warn("Invalid UV state in getEdges");
+            return Collections.emptyList();
+        }
+
+        // quad can be tiled in a direction if its high U/V is (approximately) an integer
+        boolean canTileU = floatEq(round(uvBounds.uMax), uvBounds.uMax, ROUND_BITS);
+        boolean canTileV = floatEq(round(uvBounds.vMax), uvBounds.vMax, ROUND_BITS);
+
+        if (canTileU && canTileV) {
+            return Arrays.asList(
+                new Edge(vertices[minUMinV].getPosition(), vertices[minUMaxV].getPosition()),
+                new Edge(vertices[maxUMinV].getPosition(), vertices[maxUMaxV].getPosition()),
+                new Edge(vertices[minUMinV].getPosition(), vertices[maxUMinV].getPosition()),
+                new Edge(vertices[minUMaxV].getPosition(), vertices[maxUMaxV].getPosition()));
+        } else if (canTileU) {
+            return Arrays.asList(
+                new Edge(vertices[minUMinV].getPosition(), vertices[minUMaxV].getPosition()),
+                new Edge(vertices[maxUMinV].getPosition(), vertices[maxUMaxV].getPosition()));
+        } else if (canTileV) {
+            return Arrays.asList(
+                new Edge(vertices[minUMinV].getPosition(), vertices[maxUMinV].getPosition()),
+                new Edge(vertices[minUMaxV].getPosition(), vertices[maxUMaxV].getPosition()));
+        } else {
+            LOGGER.warn("getEdges called on a quad that can't be tiled during mesh optimization.");
+            return Collections.emptyList();
+        }
     }
 
     // An edge is equal to another edge if it has the same 2 points regardless of order

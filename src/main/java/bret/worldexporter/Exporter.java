@@ -133,6 +133,7 @@ public class Exporter {
             for (Vertex vertex : quad.getVertices()) {
                 vertex.getUv().y = 1 - vertex.getUv().y;
             }
+            quad.updateUvBounds();
         }
     }
 
