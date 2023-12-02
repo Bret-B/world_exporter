@@ -60,7 +60,7 @@ for selected_object in bpy.context.selected_objects:
 
                 specular_input = node.inputs['Specular']
                 if specular_input.default_value == 0.0:  # strict floating point check is OK here since default is 0.0
-                    specular_input.default_value = 0.5
+                    specular_input.default_value = set_nonzero_specular
                 
                 if node.inputs['Alpha'].is_linked:
                     mat.blend_method = 'HASHED'
