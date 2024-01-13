@@ -146,7 +146,7 @@ public class ObjExporter extends Exporter {
                     modelId = modelCount++;
                     colorLightToIdMap.put(colorModel, modelId);
                     BufferedImage image = generatePixelImage(color);
-                    String modelName = "color_" + Integer.toHexString(color) + (light == 0 ? "" : "_light_" + light) + '_' + modelId;
+                    String modelName = "colorABGR_" + Integer.toHexString(color) + (light == 0 ? "" : "_light_" + light) + '_' + modelId;
                     modelIdToName.put(modelId, modelName);
                     writeTextureOnThread(new File(texturePath, modelName + ".png"), image);
                     mtlWriter.write("newmtl " + modelName + '\n');

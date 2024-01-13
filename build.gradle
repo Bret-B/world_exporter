@@ -191,6 +191,8 @@ dependencies {
 //    runtimeOnly fg.deobf("mekanism:MekanismAdditions:1.16.5-10.1.2.457")
 //    runtimeOnly fg.deobf("mekanism:MekanismGenerators:1.16.5-10.1.2.457")
 //    runtimeOnly fg.deobf("mekanism:MekanismTools:1.16.5-10.1.2.457")
+//    runtimeOnly fg.deobf("mobgrindingutils:mob_grinding_utils:1.16.5-0.4.47")
+//    runtimeOnly fg.deobf("chisel:Chisel:MC1.16.5-2.0.1-alpha.4")
 }
 
 mixin {

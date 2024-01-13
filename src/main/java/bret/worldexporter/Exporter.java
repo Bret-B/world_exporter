@@ -183,16 +183,25 @@ public class Exporter {
     // fetch the Texture for a ResourceLocation from Minecraft's TextureManager, or try to load it if needed
     public Texture getTexture(ResourceLocation resource, boolean threaded) {
         TextureManager textureManager = Minecraft.getInstance().getTextureManager();
-        Texture texture = textureManager.getTexture(resource);
+        Texture texture;
+        // For some reason, the block atlas texture can rarely become null and therefore tries to be registered which
+        // results in the texture being set to the missing texture.
+        // Could be caused by a duplicate reload of the same texture or some kind of race condition/mutex problem?
+        // This synchronization on the textureManager instance may prevent this
+        synchronized (textureManager) {
+            texture = textureManager.getTexture(resource);
+        }
         if (texture == null) {
             LOGGER.info("Loading the following resource: " + resource);
             // The texture is not currently loaded. This can be caused by entities outside render distance for example.
             // attempt to load the texture into the texture manager (see TextureManager._bind() and register())
-            Texture newTexture = new SimpleTexture(resource);
+            Texture newTexture = new SimpleTexture(resource);  // using a SimpleTexture replicates behavior of _bind()
             if (threaded) {
                 try {
                     RunnableFuture<Boolean> task = new FutureTask<>(() -> {
-                        textureManager.register(resource, newTexture);
+                        synchronized (textureManager) {
+                            textureManager.register(resource, newTexture);
+                        }
                         return true;
                     });
                     addTask(task);
@@ -202,7 +211,10 @@ public class Exporter {
             } else {
                 textureManager.register(resource, newTexture);
             }
-            texture = textureManager.getTexture(resource);
+
+            synchronized (textureManager) {
+                texture = textureManager.getTexture(resource);
+            }
         }
         return texture;
     }
@@ -244,8 +256,10 @@ public class Exporter {
             // basic single threaded export ran on the main thread
             tasks.get(0).run();
         } else {
-            // create the given amount of threads, and start a runnable on each thread
-            ExecutorService exporterThreadPool = Executors.newFixedThreadPool(threads);
+            // create the given amount of threads (capped to number of tasks), and start a runnable on each thread
+            int numThreads = Math.min(threads, tasks.size());
+            ExecutorService exporterThreadPool = Executors.newFixedThreadPool(numThreads);
+            LOGGER.info("Exporter created " + numThreads + " threads");
             tasks.forEach(exporterThreadPool::submit);
             exporterThreadPool.shutdown();
             // wait in this loop to do tasks that are required to be run in the main thread, until threads are finished
@@ -343,7 +357,7 @@ public class Exporter {
         // Currently this is a memoized linear check over all an atlasTexture's TextureAtlasSprites to find
         // which TextureAtlasSprite contains the given UVBounds
         // If this is ever too slow a structure like a quadtree or spatial hashing could be used, but profiling shows this to be a non-issue
-        synchronized (this) {
+        synchronized (atlasUVToSpriteCache) {
             return atlasUVToSpriteCache.computeIfAbsent(Pair.of(resource, new UVBounds(uvBounds)), k -> {
                 for (ResourceLocation name : atlasTexture.texturesByName.keySet()) {
                     TextureAtlasSprite sprite = atlasTexture.getSprite(name);
@@ -377,7 +391,11 @@ public class Exporter {
     // Generates a 1x1 pixel image with the color given by the quad
     protected BufferedImage generatePixelImage(int color) {
         BufferedImage image = new BufferedImage(1, 1, TYPE_INT_ARGB);
-        image.setRGB(0, 0, color);
+        // quad colors are packed ABGR, so it must be changed to the expected format
+        int argb = color & 0xFF00FF00;  // alpha and green channels have the same position
+        argb |= (color & 0x00FF0000) >>> 16;  // shift the blue channel
+        argb |= (color & 0x000000FF) << 16;  // shift the red channel
+        image.setRGB(0, 0, argb);
         return image;
     }
 

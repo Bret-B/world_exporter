@@ -453,7 +453,7 @@ class ExporterRunnable implements Runnable {
         bufferBuilder.end();
         com.mojang.datafixers.util.Pair<BufferBuilder.DrawState, ByteBuffer> stateBufferPair = bufferBuilder.popNextBuffer();
         BufferBuilder.DrawState drawState = stateBufferPair.getFirst();
-        VertexFormat format = type.format();
+        VertexFormat format = drawState.format();
         if (drawState.vertexCount() == 0) {
             return;
         }
@@ -497,6 +497,15 @@ class ExporterRunnable implements Runnable {
                     + '\n' + "Using GL drawstate ID: " + drawState.mode());
             return;
         }
+        if (drawState.vertexCount() != (bytebuffer.limit() / drawState.format().getVertexSize())) {
+            throw new RuntimeException(String.format(
+                    "Mismatch between drawState vertex count (%d) and number of vertices contained in bytebuffer (%d) \n" +
+                            "Bytebuffer has limit (%d) and capacity (%d)" ,
+                    drawState.vertexCount(),
+                    bytebuffer.limit() / drawState.format().getVertexSize(),
+                    bytebuffer.limit(),
+                    bytebuffer.capacity()));
+        }
 
         ArrayList<Quad> quadList;
         if (lastFallbackIsBlock && lastFallbackBlock != null) {
@@ -508,7 +517,7 @@ class ExporterRunnable implements Runnable {
             return;
         }
 
-        addVertices(bytebuffer, impl.builder.getVertexFormat().getElements(), quadList, impl.lastState.orElse(null), 0, drawState.vertexCount());
+        addVertices(bytebuffer, drawState.format().getElements(), quadList, impl.lastState.orElse(null), 0, drawState.vertexCount());
         impl.builder.discard();
     }
 
@@ -545,7 +554,8 @@ class ExporterRunnable implements Runnable {
                 } else {
                     LOGGER.warn("Unable to determine where on atlas " + ((AtlasTexture) baseTexture).location() +
                             " the texture is with the following UVs: " + quad.getUvBounds() +
-                            ", derived from from ResourceLocation " + quad.getResource());
+                            ", derived from from ResourceLocation " + quad.getResource() +
+                            ", at world position " + quad.getVertices()[0].getPosition());
                 }
             } else if (baseTexture instanceof DynamicTexture) {
                 NativeImage quadImage = ((DynamicTexture) baseTexture).getPixels();
@@ -585,7 +595,7 @@ class ExporterRunnable implements Runnable {
                 exporter.addTask(task);
                 fallbackSort = !task.get();
             } catch (InterruptedException | ExecutionException e) {
-                LOGGER.warn("Unable to sort quads on main thread, falling back to threaded sort");
+                LOGGER.warn("Unable to sort quads on main thread, falling back to threaded sort", e);
                 fallbackSort = true;
             }
         } else {
