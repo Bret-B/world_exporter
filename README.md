@@ -10,6 +10,9 @@ A Minecraft Forge mod for exporting parts of a world to a Wavefront .obj file.
 * Modded blocks are supported, including tile entity renderers
 * Entities like beds, chests, item frames, mobs, players, dropped items, etc. are supported
 * Includes mesh optimizations with texture tiling for smaller file sizes and fewer vertices/faces
+* Multiple config options to cull faces that don't connect to areas exposed to skylight
+  * This can eliminate useless faces for things like caves and underground structures when the areas of interest are primarily exterior
+  * Enabling this on a 2048x256x2048 block export reduced the number of faces from ~22 million to ~7.6 million
 
 # Usage
 
@@ -55,7 +58,9 @@ Use `-1` for the radius to revert back to default and forget the chunks that are
 The mod has multiple options that can be changed using Forge's configuration system.
 
 You can either install [Configured](https://www.curseforge.com/minecraft/mc-mods/configured) for a config GUI or edit the CLIENT configuration .toml manually:
-run `/config showfile worldexporter CLIENT` to get the config location and then `/reload` once changes are made and saved
+run `/config showfile worldexporter CLIENT` to get the config location. A reload of the world (or server reconnect) might be required in some cases to apply config settings after saving the file.
+
+Descriptions of the configuration options are provided in the config file and are also visible through Configured.
 
 # Renders of an Exported World
 

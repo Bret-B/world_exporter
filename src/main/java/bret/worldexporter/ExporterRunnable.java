@@ -3,6 +3,8 @@ package bret.worldexporter;
 import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
+import bret.worldexporter.util.BlockPosUtils;
+import bret.worldexporter.util.LightConnectedPathfinder;
 import bret.worldexporter.util.ReflectionHandler;
 import com.mojang.blaze3d.matrix.MatrixStack;
 import net.minecraft.block.Block;
@@ -35,6 +37,7 @@ import net.minecraftforge.client.model.data.IModelData;
 import org.apache.commons.lang3.tuple.Pair;
 import org.lwjgl.opengl.GL11;
 
+import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -45,6 +48,8 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static bret.worldexporter.Exporter.LOGGER;
+import static bret.worldexporter.Exporter.WORLD_LOWER_HEIGHT_LIMIT;
+import static bret.worldexporter.Exporter.WORLD_HEIGHT_LIMIT;
 
 class ExporterRunnable implements Runnable {
     protected final Map<RenderType, Map<BlockPos, Pair<Integer, Integer>>> layerPosVertexCountsMap = new HashMap<>();
@@ -59,6 +64,9 @@ class ExporterRunnable implements Runnable {
     private final Exporter exporter;
     private final int chunksPerConsume;
     private final Consumer<ArrayList<ExportChunk>> chunkConsumer;
+    private final boolean renderCutout;
+    private final Map<net.minecraftforge.registries.IRegistryDelegate<Block>, java.util.function.Predicate<RenderType>> blockRenderChecks;
+    private final Map<net.minecraftforge.registries.IRegistryDelegate<Fluid>, java.util.function.Predicate<RenderType>> fluidRenderChecks;
     private ArrayList<ExportChunk> resultChunks = new ArrayList<>();
     private BlockPos lastFixedBlock;
     private UUID lastFixedEntityUUID;
@@ -66,18 +74,17 @@ class ExporterRunnable implements Runnable {
     private BlockPos lastFallbackBlock;
     private UUID lastFallbackEntityUUID;
     private boolean lastFallbackIsBlock;
-    private final boolean renderCutout;
-    private final Map<net.minecraftforge.registries.IRegistryDelegate<Block>, java.util.function.Predicate<RenderType>> blockRenderChecks;
-    private final Map<net.minecraftforge.registries.IRegistryDelegate<Fluid>, java.util.function.Predicate<RenderType>> fluidRenderChecks;
+    private Set<Long> lightConnected;
 
     @SuppressWarnings("unchecked")
     public ExporterRunnable(Exporter exporter, Collection<Pair<BlockPos, BlockPos>> chunkBoundaries,
-                            boolean threaded, Consumer<ArrayList<ExportChunk>> chunkConsumer, int chunksPerConsume) {
+                            boolean threaded, Consumer<ArrayList<ExportChunk>> chunkConsumer, int chunksPerConsume, @Nullable Set<Long> lightConnected) {
         this.exporter = exporter;
         this.chunkBoundaries = chunkBoundaries;
         this.threaded = threaded;
         this.chunkConsumer = chunkConsumer;
         this.chunksPerConsume = chunksPerConsume;
+        this.lightConnected = lightConnected;
         impl = new CustomImpl(this);
         renderCutout = Minecraft.useFancyGraphics();
 
@@ -166,10 +173,27 @@ class ExporterRunnable implements Runnable {
         Chunk chunk = exporter.world.getChunkAt(start);
         if (chunk.isEmpty()) return quads;
 
+        boolean useLightConnected = WorldExporterConfig.CLIENT.exportVisibleExteriorOnly.get();
+        boolean segmentLightConnectionBuilding = WorldExporterConfig.CLIENT.segmentedExteriorPathfinding.get();
+        if (useLightConnected && segmentLightConnectionBuilding) {
+            int segmentChunkDistance = WorldExporterConfig.CLIENT.segmentChunkRadius.get();
+            Pair<BlockPos, BlockPos> segment = BlockPosUtils.extendChunks(start, end, segmentChunkDistance);
+            LightConnectedPathfinder lightFinder = new LightConnectedPathfinder(exporter, exporter.world, segment.getLeft(), segment.getRight());
+            lightConnected = lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get());
+        }
+
         Random random = new Random();
         MatrixStack matrixStack = new MatrixStack();
         float partialTicks = Minecraft.getInstance().getFrameTime();
-        for (BlockPos pos : BlockPos.betweenClosed(start, end)) {
+        BlockPos startClampedHeight = new BlockPos(start.getX(),
+                Math.max(WORLD_LOWER_HEIGHT_LIMIT, Math.min(WORLD_HEIGHT_LIMIT, start.getY())), start.getZ());
+        BlockPos endClampedHeight = new BlockPos(end.getX(),
+                Math.max(WORLD_LOWER_HEIGHT_LIMIT, Math.min(WORLD_HEIGHT_LIMIT, end.getY())), end.getZ());
+        for (BlockPos pos : BlockPos.betweenClosed(startClampedHeight, endClampedHeight)) {
+            if (useLightConnected && !lightConnected.contains(pos.asLong())) {
+                continue;
+            }
+
             BlockState state = chunk.getBlockState(pos);
             if (state.getBlock().isAir(state, exporter.world, pos)) {
                 continue;
@@ -500,7 +524,7 @@ class ExporterRunnable implements Runnable {
         if (drawState.vertexCount() != (bytebuffer.limit() / drawState.format().getVertexSize())) {
             throw new RuntimeException(String.format(
                     "Mismatch between drawState vertex count (%d) and number of vertices contained in bytebuffer (%d) \n" +
-                            "Bytebuffer has limit (%d) and capacity (%d)" ,
+                            "Bytebuffer has limit (%d) and capacity (%d)",
                     drawState.vertexCount(),
                     bytebuffer.limit() / drawState.format().getVertexSize(),
                     bytebuffer.limit(),
@@ -581,7 +605,7 @@ class ExporterRunnable implements Runnable {
     }
 
     // update any quads that overlap by translating by a small multiple of their normal
-    protected void fixOverlaps(Collection<ArrayList<Quad>> quadsArrays) {
+    private void fixOverlaps(Collection<ArrayList<Quad>> quadsArrays) {
         Exporter.removeDuplicateQuads(quadsArrays);
 
         boolean fallbackSort;

@@ -27,9 +27,9 @@ public class ObjExporter extends Exporter {
     private final File baseDir = new File(Minecraft.getInstance().gameDirectory, "worldexporter/worlddump" + java.time.LocalDateTime.now().toString().replace(':', '-'));
     private final File texturePath = new File(baseDir, TEXTURE_DIR);
     // geometric vertices cache (tag v) for the .obj output which maps the vertex to its number in the file
-    private final Map<Vector3f, Integer> verticesCache = new LRUCache<>(20000);
+    private final Map<Vector3f, Integer> verticesCache = new LRUCache<>(40000);
     // uv texture coordinates cache (tag vt) for the .obj output which maps the uv value to its number in the file
-    private final Map<Vector2f, Integer> uvCache = new LRUCache<>(5000);
+    private final Map<Vector2f, Integer> uvCache = new LRUCache<>(20000);
     private final int[] vertUVIndices = new int[8];
     private final Map<Triple<ResourceLocation, Integer, Integer>, Integer> modelToIdMap = new HashMap<>();
     private final Map<Pair<Integer, Integer>, Integer> colorLightToIdMap = new HashMap<>();

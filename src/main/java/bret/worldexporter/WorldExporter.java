@@ -98,7 +98,10 @@ public class WorldExporter {
             success = objExporter.export("world", "world_materials");
         } catch (OutOfMemoryError e) {
             player.sendMessage(new StringTextComponent("Ran out of memory while exporting. " +
-                            "Allocate more memory to Minecraft or reduce the number of export threads and try again."),
+                            "Allocate more memory to Minecraft or reduce the number of export threads and try again." +
+                            ((WorldExporterConfig.CLIENT.exportVisibleExteriorOnly.get()
+                                    && !WorldExporterConfig.CLIENT.segmentedExteriorPathfinding.get())
+                                    ? " Also, turning on segmentedExteriorPathfinding can help reduce required memory" : "")),
                     Util.NIL_UUID
             );
             System.gc();

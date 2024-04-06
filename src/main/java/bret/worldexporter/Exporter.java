@@ -2,9 +2,7 @@ package bret.worldexporter;
 
 import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.render.CustomBlockRendererDispatcher;
-import bret.worldexporter.util.ImgUtils;
-import bret.worldexporter.util.LABPBRParser;
-import bret.worldexporter.util.OptifineReflector;
+import bret.worldexporter.util.*;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.client.renderer.Atlases;
@@ -16,7 +14,9 @@ import net.minecraft.client.settings.AmbientOcclusionStatus;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.util.Direction;
 import net.minecraft.util.ResourceLocation;
+import net.minecraft.util.Timer;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.chunk.Chunk;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -37,6 +37,8 @@ import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
 public class Exporter {
     public static final Logger LOGGER = LogManager.getLogger(WorldExporter.MODID);
+    public static final int WORLD_HEIGHT_LIMIT = 255;
+    public static final int WORLD_LOWER_HEIGHT_LIMIT = 0;
     private static final int CHUNKS_PER_CONSUME = 10;
     private static final int OTHER_ORDER = 3;
     private static final Map<RenderType, Integer> renderOrder = new HashMap<RenderType, Integer>() {{
@@ -69,10 +71,10 @@ public class Exporter {
     private final ArrayBlockingQueue<Runnable> mainThreadTasks = new ArrayBlockingQueue<>(10);
     private final ExecutorService threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
     private final int threads;
-    private final int lowerHeightLimit;
-    private final int upperHeightLimit;
-    private final BlockPos startPos;  // higher values
-    private final BlockPos endPos;  // lower values
+    private BlockPos startPos;  // higher values
+    private BlockPos endPos;  // lower values
+    private BlockPos startPosClampedHeight;  // higher values
+    private BlockPos endPosClampedHeight;  // lower values
     private AmbientOcclusionStatus preAO = mc.options.ambientOcclusion;
     private boolean preShadows = mc.options.entityShadows;
     private int currentX;
@@ -83,16 +85,32 @@ public class Exporter {
         this.randomize = randomize;
         this.optimizeMesh = optimizeMesh;
         this.threads = threads;
-        lowerHeightLimit = lower;
-        upperHeightLimit = upper;
         playerX = (int) player.getX();
         playerZ = (int) player.getZ();
         playerXOffset = WorldExporterConfig.CLIENT.relativeCoordinates.get() ? playerX : 0;
         playerZOffset = WorldExporterConfig.CLIENT.relativeCoordinates.get() ? playerZ : 0;
-        startPos = new BlockPos(playerX + radius, upperHeightLimit, playerZ + radius);
-        endPos = new BlockPos(playerX - radius, lowerHeightLimit, playerZ - radius);
+        startPos = new BlockPos(playerX + radius, upper, playerZ + radius);
+        endPos = new BlockPos(playerX - radius, lower, playerZ - radius);
+        startPosClampedHeight = new BlockPos(startPos.getX(), Math.min(upper, WORLD_HEIGHT_LIMIT), startPos.getZ());
+        endPosClampedHeight = new BlockPos(endPos.getX(), Math.max(lower, WORLD_LOWER_HEIGHT_LIMIT), endPos.getZ());
         currentX = startPos.getX();
         currentZ = startPos.getZ();
+    }
+
+    public BlockPos getStartPos() {
+        return startPos;
+    }
+
+    public BlockPos getEndPos() {
+        return endPos;
+    }
+
+    public BlockPos getStartPosClampedHeight() {
+        return startPosClampedHeight;
+    }
+
+    public BlockPos getEndPosClampedHeight() {
+        return endPosClampedHeight;
     }
 
     public static boolean invalidGlId(int glTextureId) {
@@ -219,22 +237,171 @@ public class Exporter {
         return texture;
     }
 
+    private void setPause(boolean paused) {
+        if (mc.getSingleplayerServer() == null) {
+            return;
+        }
+
+        try {
+            Field pause = Objects.requireNonNull(ReflectionHandler.getField(Minecraft.class, "pause"));
+            Field pausePartialTick = Objects.requireNonNull(ReflectionHandler.getField(Minecraft.class, "pausePartialTick"));
+            Timer mcTimer = (Timer) Objects.requireNonNull(ReflectionHandler.getField(Minecraft.class, "timer")).get(mc);
+            pause.setBoolean(mc, paused);
+            if (paused) {
+                pausePartialTick.setFloat(mc, mcTimer.partialTick);
+            } else {
+                mcTimer.partialTick = pausePartialTick.getFloat(mc);
+            }
+        } catch (IllegalAccessException | NullPointerException | ClassCastException e) {
+            LOGGER.warn("Unable to change pause status of internal server");
+        }
+    }
+
     // required to change MC options for proper export rendering
     public void setup() {
         preAO = mc.options.ambientOcclusion;
         preShadows = mc.options.entityShadows;
         mc.options.ambientOcclusion = AmbientOcclusionStatus.OFF;
         mc.options.entityShadows = false;
+
+        // pause the IntegratedServer, if there is one
+        setPause(true);
     }
 
     // required to reset MC options related rendering
     public void finish() {
         mc.options.ambientOcclusion = preAO;
         mc.options.entityShadows = preShadows;
+
+        // resume the IntegratedServer, if there is one
+        setPause(false);
+    }
+
+    public boolean isOnExportEdge(BlockPos pos) {
+        return pos.getX() == startPos.getX() || pos.getX() == endPos.getX()
+                || pos.getY() == startPosClampedHeight.getY() || pos.getY() == endPosClampedHeight.getY()
+                || pos.getZ() == startPos.getZ() || pos.getZ() == endPos.getZ();
+    }
+
+    public boolean inExportRange(BlockPos pos) {
+        return endPos.getX() <= pos.getX() && pos.getX() <= startPos.getX()
+                && endPosClampedHeight.getY() <= pos.getY() && pos.getY() <= startPosClampedHeight.getY()
+                && endPos.getZ() <= pos.getZ() && pos.getZ() <= startPos.getZ();
+    }
+
+    // returns 0 if pos lies along the edge of the export
+    // returns 1 if pos is inside the export
+    // returns -1 if pos is outside the export
+    public int inExportStatus(BlockPos pos) {
+        return isOnExportEdge(pos) ? 0 : (inExportRange(pos) ? 1 : -1);
+    }
+
+    // attempts to shrink the actual export radius to include only chunks that are loaded
+    // (only in the NESW directions, never vertically)
+    private void shrinkStartEndPosBBOXCardinal() {
+        Chunk ch;
+        int lowX = endPos.getX();
+        int lowZ = endPos.getZ();
+        int highX = startPos.getX();
+        int highZ = startPos.getZ();
+        LOGGER.info("Shrinking original bbox of (lowx, lowz, highx, highz) = ({}, {}, {}, {})", lowX, lowZ, highX, highZ);
+
+        // starting at endPos chunk, scanline chunks towards startPos in + x direction
+        // finds lowX
+        for (int x = endPos.getX(); x != startPos.getX(); x = Math.min(x + 16, startPos.getX())) {
+            boolean lineHasChunk = false;
+            for (int z = endPos.getZ(); z != startPos.getZ(); z = Math.min(z + 16, startPos.getZ())) {
+                ch = world.getChunk(x >> 4, z >> 4);
+                if (!ch.isEmpty()) {
+                    lineHasChunk = true;
+                    break;
+                }
+            }
+            if (lineHasChunk) {
+                lowX = BlockPosUtils.lowestCoordinateInChunk(x);
+                break;
+            }
+        }
+
+        // starting at endPos chunk, scanline chunks towards startPos in + z direction
+        // finds lowZ
+        for (int z = endPos.getZ(); z != startPos.getZ(); z = Math.min(z + 16, startPos.getZ())) {
+            boolean lineHasChunk = false;
+            for (int x = endPos.getX(); x != startPos.getX(); x = Math.min(x + 16, startPos.getX())) {
+                ch = world.getChunk(x >> 4, z >> 4);
+                if (!ch.isEmpty()) {
+                    lineHasChunk = true;
+                    break;
+                }
+            }
+            if (lineHasChunk) {
+                lowZ = BlockPosUtils.lowestCoordinateInChunk(z);
+                break;
+            }
+        }
+
+        // starting at startPos chunk, scanline chunks towards endPos in - x direction
+        // finds highX
+        for (int x = startPos.getX(); x != endPos.getX(); x = Math.max(x - 16, endPos.getX())) {
+            boolean lineHasChunk = false;
+            for (int z = startPos.getZ(); z != endPos.getZ(); z = Math.max(z - 16, endPos.getZ())) {
+                ch = world.getChunk(x >> 4, z >> 4);
+                if (!ch.isEmpty()) {
+                    lineHasChunk = true;
+                    break;
+                }
+            }
+            if (lineHasChunk) {
+                highX = BlockPosUtils.highestCoordinateInChunk(x);
+                break;
+            }
+        }
+
+        // starting at startPos chunk, scanline chunks towards endPos in - z direction
+        // finds highZ
+        for (int z = startPos.getZ(); z != endPos.getZ(); z = Math.max(z - 16, endPos.getZ())) {
+            boolean lineHasChunk = false;
+            for (int x = startPos.getX(); x != endPos.getX(); x = Math.max(x - 16, endPos.getX())) {
+                ch = world.getChunk(x >> 4, z >> 4);
+                if (!ch.isEmpty()) {
+                    lineHasChunk = true;
+                    break;
+                }
+            }
+            if (lineHasChunk) {
+                highZ = BlockPosUtils.highestCoordinateInChunk(z);
+                break;
+            }
+        }
+
+        endPos = new BlockPos(
+                Math.max(endPos.getX(), lowX),
+                endPos.getY(),
+                Math.max(endPos.getZ(), lowZ));
+        startPos = new BlockPos(
+                Math.min(startPos.getX(), highX),
+                startPos.getY(),
+                Math.min(startPos.getZ(), highZ));
+        endPosClampedHeight = new BlockPos(endPos.getX(), endPosClampedHeight.getY(), endPos.getZ());
+        startPosClampedHeight = new BlockPos(startPos.getX(), startPosClampedHeight.getY(), startPos.getZ());
+        currentX = startPos.getX();
+        currentZ = startPos.getZ();
+        LOGGER.info("To (lowx, lowz, highx, highz) = ({}, {}, {}, {})",
+                endPos.getX(), endPos.getZ(), startPos.getX(), startPos.getZ());
     }
 
     // this function MUST be run on the main thread
     public void exportQuads(Consumer<ArrayList<ExportChunk>> chunkConsumer) throws InterruptedException {
+        // shrink the initially supplied region to include only loaded chunks
+        shrinkStartEndPosBBOXCardinal();
+
+        // build the entire light connected set if segmentation is disabled
+        Set<Long> lightConnected = null;
+        if (WorldExporterConfig.CLIENT.exportVisibleExteriorOnly.get() && !WorldExporterConfig.CLIENT.segmentedExteriorPathfinding.get()) {
+            LightConnectedPathfinder lightFinder = new LightConnectedPathfinder(this, world);
+            lightConnected = lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get());
+        }
+
         boolean threaded = threads != 1;
         List<Pair<BlockPos, BlockPos>> allChunks = getMultipleChunkPos(Integer.MAX_VALUE);
         ArrayList<Runnable> tasks = new ArrayList<>();
@@ -249,7 +416,7 @@ public class Exporter {
         if (chunkPartitions.size() > threads) throw new RuntimeException("chunkPartition size mismatch");
 
         for (List<Pair<BlockPos, BlockPos>> chunkPartition : chunkPartitions) {
-            tasks.add(new ExporterRunnable(this, chunkPartition, threaded, chunkConsumer, CHUNKS_PER_CONSUME));
+            tasks.add(new ExporterRunnable(this, chunkPartition, threaded, chunkConsumer, CHUNKS_PER_CONSUME, lightConnected));
         }
 
         if (threads == 1) {
@@ -287,17 +454,17 @@ public class Exporter {
     // Returns the facing directions that should be forcibly enabled (at the edge of the export) for a given BlockPos
     public BitSet getForcedDirections(BlockPos pos) {
         BitSet bitSet = new BitSet();
-        if (pos.getX() >= startPos.getX())
+        if (pos.getX() >= startPosClampedHeight.getX())
             bitSet.set(Direction.fromAxisAndDirection(Direction.Axis.X, Direction.AxisDirection.POSITIVE).get3DDataValue());
-        if (pos.getX() <= endPos.getX())
+        if (pos.getX() <= endPosClampedHeight.getX())
             bitSet.set(Direction.fromAxisAndDirection(Direction.Axis.X, Direction.AxisDirection.NEGATIVE).get3DDataValue());
-        if (pos.getY() >= startPos.getY())
+        if (pos.getY() >= startPosClampedHeight.getY())
             bitSet.set(Direction.fromAxisAndDirection(Direction.Axis.Y, Direction.AxisDirection.POSITIVE).get3DDataValue());
-        if (pos.getY() <= endPos.getY())
+        if (pos.getY() <= endPosClampedHeight.getY())
             bitSet.set(Direction.fromAxisAndDirection(Direction.Axis.Y, Direction.AxisDirection.NEGATIVE).get3DDataValue());
-        if (pos.getZ() >= startPos.getZ())
+        if (pos.getZ() >= startPosClampedHeight.getZ())
             bitSet.set(Direction.fromAxisAndDirection(Direction.Axis.Z, Direction.AxisDirection.POSITIVE).get3DDataValue());
-        if (pos.getZ() <= endPos.getZ())
+        if (pos.getZ() <= endPosClampedHeight.getZ())
             bitSet.set(Direction.fromAxisAndDirection(Direction.Axis.Z, Direction.AxisDirection.NEGATIVE).get3DDataValue());
         return bitSet;
     }
@@ -311,8 +478,11 @@ public class Exporter {
         // ((a % b) + b) % b gives true modulus instead of just remainder
         int chunkXOffset = ((currentX % 16) + 16) % 16;
         int chunkZOffset = ((currentZ % 16) + 16) % 16;
-        BlockPos thisChunkStart = new BlockPos(currentX, upperHeightLimit, currentZ);
-        BlockPos thisChunkEnd = new BlockPos(Math.max(currentX - chunkXOffset, endPos.getX()), lowerHeightLimit, Math.max(currentZ - chunkZOffset, endPos.getZ()));
+        BlockPos thisChunkStart = new BlockPos(currentX, startPos.getY(), currentZ);
+        BlockPos thisChunkEnd = new BlockPos(
+                Math.max(currentX - chunkXOffset, endPos.getX()),
+                endPos.getY(),
+                Math.max(currentZ - chunkZOffset, endPos.getZ()));
         // Update the current position to be the starting position of the next chunk export (which may be
         // outside the selected boundary, accounted for at the beginning of the function call).
         currentX -= (thisChunkStart.getX() - thisChunkEnd.getX() + 1);

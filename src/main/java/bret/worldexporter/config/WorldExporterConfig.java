@@ -4,6 +4,7 @@ import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.ForgeConfigSpec.BooleanValue;
 import net.minecraftforge.common.ForgeConfigSpec.DoubleValue;
 import net.minecraftforge.common.ForgeConfigSpec.EnumValue;
+import net.minecraftforge.common.ForgeConfigSpec.IntValue;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.config.ModConfig;
 import org.apache.commons.lang3.tuple.Pair;
@@ -51,6 +52,10 @@ public class WorldExporterConfig {
         public final BooleanValue outputInvisibleFaces;
         public final DoubleValue normalStrength;
         public final DoubleValue overlapDistance;
+        public final BooleanValue exportVisibleExteriorOnly;
+        public final IntValue maxVisibilityPathLength;
+        public final BooleanValue segmentedExteriorPathfinding;
+        public final IntValue segmentChunkRadius;
 
         Client(final ForgeConfigSpec.Builder builder) {
             builder.comment("Client-only settings").push("client");
@@ -125,6 +130,36 @@ public class WorldExporterConfig {
                     .comment("Enable to always output faces that are completely invisible/transparent")
                     .translation("worldexporter.config.client.outputInvisibleFaces")
                     .define("outputInvisibleFaces", true);
+
+            exportVisibleExteriorOnly = builder
+                    .comment("Enable to output only faces that are visible from the outside of the export." +
+                            " For example, turning this on will eliminate the majority of caves and other underground" +
+                            " structures dependent on the max path length defined with maxVisibilityPathLength." +
+                            " Turning this on can greatly reduce the polygon count.")
+                    .translation("worldexporter.config.client.exportVisibleExteriorOnly")
+                    .define("exportVisibleExteriorOnly", false);
+
+            maxVisibilityPathLength = builder
+                    .comment("This number defines the max length of the path to skylight or the edge of the export." +
+                            " This setting only applies when exportVisibleExteriorOnly=true." +
+                            " Values higher than ((segmentChunkRadius + 1) * 16) might have less of an effect when segmentedExteriorPathfinding is enabled.")
+                    .translation("worldexporter.config.client.maxVisibilityPathLength")
+                    .defineInRange("maxVisibilityPathLength", 48, 1, Integer.MAX_VALUE);
+
+            segmentedExteriorPathfinding = builder
+                    .comment("Enable to perform segmented pathfinding for exterior visibility." +
+                            " This can be significantly faster since it can be done with multiple threads," +
+                            " and will also require less memory for large exports." +
+                            " It may reduce effectiveness for high values of maxVisibilityPathLength." +
+                            " This setting only applies when exportVisibleExteriorOnly=true.")
+                    .translation("worldexporter.config.client.segmentedExteriorPathfinding")
+                    .define("segmentedExteriorPathfinding", false);
+
+            segmentChunkRadius = builder
+                    .comment("The radius (in chunks) to do visibility pathfinding in when segmentedExteriorPathfinding=true." +
+                            " Lower numbers will result in increased speed but less accuracy, especially if maxVisibilityPathLength is high.")
+                    .translation("worldexporter.config.client.segmentChunkRadius")
+                    .defineInRange("segmentChunkRadius", 1, 0, 4);
 
             builder.pop();
         }
