@@ -22,6 +22,7 @@ public class LightConnectedPathfinder {
     private final ClientWorld world;
     private final BlockPos segmentLow;
     private final BlockPos segmentHigh;
+    private final boolean sidesAreForced;
 
     public LightConnectedPathfinder(Exporter exporter, ClientWorld world) {
         this.exporter = exporter;
@@ -31,6 +32,7 @@ public class LightConnectedPathfinder {
                 exporter.getStartPosClampedHeight());
         this.segmentLow = lowHigh.getLeft();
         this.segmentHigh = lowHigh.getRight();
+        this.sidesAreForced = exporter.sidesAreForced;
     }
 
     public LightConnectedPathfinder(Exporter exporter, ClientWorld world, BlockPos segmentStart, BlockPos segmentEnd) {
@@ -41,6 +43,7 @@ public class LightConnectedPathfinder {
                 segmentEnd);
         this.segmentLow = lowHigh.getLeft();
         this.segmentHigh = lowHigh.getRight();
+        this.sidesAreForced = exporter.sidesAreForced;
     }
 
     private boolean OutOfSegmentRange(BlockPos pos) {
@@ -52,8 +55,11 @@ public class LightConnectedPathfinder {
     // Blocks in chunks without data will (probably) be an outer face on the edge of the export and so are given light.
     // Blocks that fall on the edge of the export boundary are also given light
     private boolean hasSkyLight(BlockPos pos) {
-        return ((world.getChunkAt(pos).isEmpty() || exporter.isOnExportEdge(pos))
-                ? 15 : world.getBrightness(LightType.SKY, pos)) > 0;
+        if (sidesAreForced && (exporter.isOnExportEdge(pos) || world.getChunkAt(pos).isEmpty())) {
+            return true;
+        } else {
+            return world.getBrightness(LightType.SKY, pos) > 0;
+        }
     }
 
     private void getNeighbors(BlockPos pos, Set<Long> seen, Set<Long> alreadyAdded, Collection<Long> hasLight, Collection<Long> sideLit) {

@@ -56,6 +56,7 @@ public class WorldExporterConfig {
         public final IntValue maxVisibilityPathLength;
         public final BooleanValue segmentedExteriorPathfinding;
         public final IntValue segmentChunkRadius;
+        public final BooleanValue exportSides;
 
         Client(final ForgeConfigSpec.Builder builder) {
             builder.comment("Client-only settings").push("client");
@@ -160,6 +161,12 @@ public class WorldExporterConfig {
                             " Lower numbers will result in increased speed but less accuracy, especially if maxVisibilityPathLength is high.")
                     .translation("worldexporter.config.client.segmentChunkRadius")
                     .defineInRange("segmentChunkRadius", 1, 0, 4);
+
+            exportSides = builder
+                    .comment("Enable to have the sides of the export be solid." +
+                            " That is, the blocks along the side of the export will always be exported even if they connect to other solid blocks.")
+                    .translation("worldexporter.config.client.exportSides")
+                    .define("exportSides", true);
 
             builder.pop();
         }

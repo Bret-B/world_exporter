@@ -56,6 +56,7 @@ public class Exporter {
     }};
     public final boolean randomize;
     public final boolean optimizeMesh;
+    public final boolean sidesAreForced = WorldExporterConfig.CLIENT.exportSides.get();
     protected final Minecraft mc = Minecraft.getInstance();
     protected final CustomBlockRendererDispatcher blockRendererDispatcher = new CustomBlockRendererDispatcher(mc.getBlockRenderer().getBlockModelShaper(), mc.getBlockColors());
     protected final Map<Integer, BufferedImage> atlasCacheMap = new HashMap<>();
@@ -454,17 +455,17 @@ public class Exporter {
     // Returns the facing directions that should be forcibly enabled (at the edge of the export) for a given BlockPos
     public BitSet getForcedDirections(BlockPos pos) {
         BitSet bitSet = new BitSet();
-        if (pos.getX() >= startPosClampedHeight.getX())
+        if (sidesAreForced && pos.getX() >= startPosClampedHeight.getX())
             bitSet.set(Direction.fromAxisAndDirection(Direction.Axis.X, Direction.AxisDirection.POSITIVE).get3DDataValue());
-        if (pos.getX() <= endPosClampedHeight.getX())
+        if (sidesAreForced && pos.getX() <= endPosClampedHeight.getX())
             bitSet.set(Direction.fromAxisAndDirection(Direction.Axis.X, Direction.AxisDirection.NEGATIVE).get3DDataValue());
         if (pos.getY() >= startPosClampedHeight.getY())
             bitSet.set(Direction.fromAxisAndDirection(Direction.Axis.Y, Direction.AxisDirection.POSITIVE).get3DDataValue());
         if (pos.getY() <= endPosClampedHeight.getY())
             bitSet.set(Direction.fromAxisAndDirection(Direction.Axis.Y, Direction.AxisDirection.NEGATIVE).get3DDataValue());
-        if (pos.getZ() >= startPosClampedHeight.getZ())
+        if (sidesAreForced && pos.getZ() >= startPosClampedHeight.getZ())
             bitSet.set(Direction.fromAxisAndDirection(Direction.Axis.Z, Direction.AxisDirection.POSITIVE).get3DDataValue());
-        if (pos.getZ() <= endPosClampedHeight.getZ())
+        if (sidesAreForced && pos.getZ() <= endPosClampedHeight.getZ())
             bitSet.set(Direction.fromAxisAndDirection(Direction.Axis.Z, Direction.AxisDirection.NEGATIVE).get3DDataValue());
         return bitSet;
     }
