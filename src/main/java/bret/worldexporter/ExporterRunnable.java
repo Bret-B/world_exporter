@@ -207,7 +207,7 @@ class ExporterRunnable implements Runnable {
             }
 
             if (state.hasTileEntity()) {
-                TileEntity tileentity = exporter.world.getChunkAt(pos).getBlockEntity(pos, Chunk.CreateEntityType.CHECK);
+                TileEntity tileentity = chunk.getBlockEntity(pos, Chunk.CreateEntityType.CHECK);
                 if (tileentity != null) {
                     TileEntityRenderer<TileEntity> tileEntityRenderer = TileEntityRendererDispatcher.instance.getRenderer(tileentity);
                     int i = WorldRenderer.getLightColor(exporter.world, tileentity.getBlockPos());
@@ -245,8 +245,10 @@ class ExporterRunnable implements Runnable {
 
             // The rendering logic is roughly taken from ChunkRenderDispatcher.compile with multiple tweaks
             FluidState fluidState = exporter.world.getFluidState(pos);
+            // TODO should check if this could cause threading issues with
+            //  null model data being returned when not on main thread
             IModelData modelData = ModelDataManager.getModelData(exporter.world, pos);
-            // This more accurately matches the base ChunkRenderDispatcher code, since getModelData can be null
+            // This more accurately matches the base ChunkRenderDispatcher code, since getModelData can return null
             modelData = modelData == null ? EmptyModelData.INSTANCE : modelData;
             for (RenderType rendertype : RenderType.chunkBufferLayers()) {
                 // It appears some mods use MinecraftForgeClient.getRenderLayer() for branching rendering behavior,

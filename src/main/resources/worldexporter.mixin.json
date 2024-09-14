@@ -1,13 +1,20 @@
 {
   "required": true,
-  "minVersion": "0.7",
+  "minVersion": "0.8",
   "package": "bret.worldexporter.mixins",
   "compatibilityLevel": "JAVA_8",
   "refmap": "worldexporter.mixin.refmap.json",
   "mixins": [
-    "MixinClientPlayNetHandler"
   ],
-  "client": [],
+  "client": [
+    "MixinClientChunkProvider",
+    "MixinClientChunkProvider$MixinChunkArray",
+    "MixinClientPlayNetHandler",
+    "MixinWorldRenderer"
+  ],
+  "server": [
+
+  ],
   "injectors": {
     "defaultRequire": 1
   }

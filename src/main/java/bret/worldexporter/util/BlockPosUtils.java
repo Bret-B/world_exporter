@@ -135,7 +135,7 @@ public class BlockPosUtils {
     public static long blockVolume(BlockPos a, BlockPos b) {
         long xWidth = Math.abs(a.getX() - b.getX()) + 1;
         long zWidth = Math.abs(a.getZ() - b.getZ()) + 1;
-        long height = Math.abs(a.getY() - b.getY() + 1);
+        long height = Math.abs(a.getY() - b.getY()) + 1;
         return xWidth * zWidth * height;
     }
 }

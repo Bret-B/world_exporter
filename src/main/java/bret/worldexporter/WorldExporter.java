@@ -3,69 +3,43 @@ package bret.worldexporter;
 import bret.worldexporter.config.WorldExporterConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
-import net.minecraft.client.network.play.ClientPlayNetHandler;
 import net.minecraft.client.world.ClientWorld;
-import net.minecraft.network.play.server.SUnloadChunkPacket;
-import net.minecraft.server.integrated.IntegratedServer;
 import net.minecraft.util.Util;
 import net.minecraft.util.text.StringTextComponent;
 import net.minecraftforge.client.event.ClientChatEvent;
 import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.world.WorldEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ExtensionPoint;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.network.FMLNetworkConstants;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.Objects;
 
 @Mod(WorldExporter.MODID)
 public class WorldExporter {
     public static final String MODID = "worldexporter";
     private static final Logger LOGGER = LogManager.getLogger(WorldExporter.MODID);
     private static final String CMD_BASE = "/worldexport";
-    private static final String CMD_RADIUS = CMD_BASE + " keepradius";
-    private static final Set<HashableSUnloadChunkPacket> heldChunks = new HashSet<>();
-    private static int forceChunkRadius = -1;
+    private static boolean exporting = false;
+    private static boolean requestChunks = true;
 
     public WorldExporter() {
+        ModLoadingContext.get().registerExtensionPoint(ExtensionPoint.DISPLAYTEST, () -> Pair.of(() -> FMLNetworkConstants.IGNORESERVERONLY, (a, b) -> true));
         MinecraftForge.EVENT_BUS.register(this);
         WorldExporterConfig.register(ModLoadingContext.get());
     }
 
-    public static int getForceChunkRadius() {
-        return forceChunkRadius;
+    public static boolean isExporting() {
+        return exporting;
     }
 
-    private static void setForceChunkRadius(int newRadius) {
-        forceChunkRadius = newRadius;
-    }
-
-    public static void addHeldChunk(SUnloadChunkPacket packet) {
-        heldChunks.add(new HashableSUnloadChunkPacket(packet));
-    }
-
-    public static boolean isInRender(int chunkX, int chunkZ) {
-        int playerRender = Minecraft.getInstance().options.renderDistance;
-        ClientPlayerEntity player = Minecraft.getInstance().player;
-        if (player == null) return false;
-        int chunkXDist = Math.abs(player.xChunk - chunkX);
-        int chunkZDist = Math.abs(player.zChunk - chunkZ);
-        return chunkXDist <= playerRender && chunkZDist <= playerRender;
-    }
-
-    public static boolean isInKeepDistance(SUnloadChunkPacket packet) {
-        int keepDistance = WorldExporter.getForceChunkRadius();
-        ClientPlayerEntity player = Minecraft.getInstance().player;
-        if (player == null) return false;
-
-        int chunkXDist = Math.abs(player.xChunk - packet.getX());
-        int chunkZDist = Math.abs(player.zChunk - packet.getZ());
-        // the chunk unload should be canceled if it is within the custom WorldExporter force chunk radius
-        return chunkXDist <= keepDistance && chunkZDist <= keepDistance;
+    public static boolean canRequestChunks() {
+        return requestChunks;
     }
 
     private static void execute(String msg, ClientPlayerEntity player) {
@@ -92,6 +66,7 @@ public class WorldExporter {
         }
         threads = Math.max(1, Math.min(32, threads));
 
+        exporting = true;
         ObjExporter objExporter = new ObjExporter(player, radius, lower, upper, optimizeMesh, randomizeTextureOrientation, threads);
         boolean success;
         try {
@@ -109,6 +84,11 @@ public class WorldExporter {
         } catch (IOException e) {
             LOGGER.error("Export failed: " + e);
             success = false;
+        } finally {
+            exporting = false;
+            if (requestChunks) {
+                ((IMixinChunkArrayAccessor)(Object) Objects.requireNonNull(Minecraft.getInstance().level).getChunkSource().storage).worldexporter$clear();
+            }
         }
 
         System.gc();
@@ -116,41 +96,20 @@ public class WorldExporter {
                 success ? "Export successful." : "An error occurred when exporting the world."), Util.NIL_UUID);
     }
 
-    private static void keepRadius(String msg, ClientWorld world, ClientPlayerEntity player) {
+    private static void debug(String msg, ClientWorld world, ClientPlayerEntity player) {
+        exporting = true;
         try {
-            int newRadius = Integer.parseInt(msg.substring(CMD_RADIUS.length()).trim());
-            setForceChunkRadius(newRadius);
 
-            int chunkStorageDist;
-            if (newRadius <= 32) {
-                IntegratedServer server = Minecraft.getInstance().getSingleplayerServer();
-                // viewDistance (a server option, unique from client render distance) is guessed to be 32 if not singleplayer
-                chunkStorageDist = server == null ? 32 : server.getPlayerList().getViewDistance();
-            } else {
-                chunkStorageDist = newRadius;
+        } catch (NullPointerException | ClassCastException e) {
+            LOGGER.warn("Unable to change pause status of internal server");
+        } catch (Throwable e) {
+            throw new RuntimeException(e);
+        } finally {
+            exporting = false;
+            if (requestChunks) {
+                ((IMixinChunkArrayAccessor)(Object) Objects.requireNonNull(Minecraft.getInstance().level).getChunkSource().storage).worldexporter$clear();
             }
-            world.getChunkSource().updateViewRadius(chunkStorageDist);
-
-            ClientPlayNetHandler handler = Minecraft.getInstance().getConnection();
-            if (handler == null) return;
-
-            HashSet<HashableSUnloadChunkPacket> toRemove = new HashSet<>();
-            for (HashableSUnloadChunkPacket packet : heldChunks) {
-                if (isInRender(packet.getX(), packet.getZ())) continue;
-                if (!isInKeepDistance(packet)) {
-                    handler.handleForgetLevelChunk(packet);
-                    toRemove.add(packet);
-                }
-            }
-            heldChunks.removeAll(toRemove);
-        } catch (NumberFormatException exception) {
-            player.sendMessage(new StringTextComponent("Could not update chunk radius."), Util.NIL_UUID);
         }
-    }
-
-    @SubscribeEvent
-    public void onUnloadEvent(WorldEvent.Unload event) {
-        heldChunks.clear();
     }
 
     @SubscribeEvent
@@ -162,15 +121,14 @@ public class WorldExporter {
         if (player == null || world == null) return;
 
         // the following commands are client side only, so the event is canceled if the msg matches a command
-        if (msg.startsWith(CMD_RADIUS)) {
-            event.setCanceled(true);
-            keepRadius(msg, world, player);
-            return;
-        }
-
         if (msg.startsWith(CMD_BASE)) {
             event.setCanceled(true);
             execute(msg, player);
+        }
+
+        if (msg.startsWith("/wedebug")) {
+            event.setCanceled(true);
+            debug(msg, world, player);
         }
     }
 }
