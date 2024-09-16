@@ -15,15 +15,21 @@ import org.apache.commons.lang3.tuple.Pair;
 public class WorldExporterConfig {
     public static final Client CLIENT;
     private static final ForgeConfigSpec clientSpec;
+    public static final Server SERVER;
+    private static final ForgeConfigSpec serverSpec;
 
     static {
-        final Pair<Client, ForgeConfigSpec> specPair = new ForgeConfigSpec.Builder().configure(Client::new);
-        clientSpec = specPair.getRight();
-        CLIENT = specPair.getLeft();
+        final Pair<Client, ForgeConfigSpec> clientSpecPair = new ForgeConfigSpec.Builder().configure(Client::new);
+        clientSpec = clientSpecPair.getRight();
+        CLIENT = clientSpecPair.getLeft();
+        final Pair<Server, ForgeConfigSpec> serverSpecPair = new ForgeConfigSpec.Builder().configure(Server::new);
+        serverSpec = serverSpecPair.getRight();
+        SERVER = serverSpecPair.getLeft();
     }
 
     public static void register(final ModLoadingContext context) {
         context.registerConfig(ModConfig.Type.CLIENT, clientSpec);
+        context.registerConfig(ModConfig.Type.SERVER, serverSpec);
     }
 
     public enum ChunkExportType {
@@ -35,6 +41,32 @@ public class WorldExporterConfig {
     public enum NormalFormat {
         OPENGL,
         DIRECTX
+    }
+
+    public static class Server {
+        public final BooleanValue pauseEnabled;
+        public final IntValue requiredPermissionLevel;
+
+        Server(final ForgeConfigSpec.Builder builder) {
+            builder.comment("Server-only settings").push("server");
+
+            pauseEnabled = builder
+                    .comment("Set this to true to allow users with permissions to pause the server during an export" +
+                            " See the sever configuration file (server.properties)" +
+                            " under op-permission-level for the level given to server ops. Default: 4")
+                    .translation("worldexporter.config.server.pauseEnabled")
+                    .define("pauseEnabled", true);
+
+            requiredPermissionLevel = builder
+                    .comment("The required permission level, 0 through 4, that lets a client pause the server for" +
+                            " exports (if enabled) and request chunks from the server." +
+                            " See the sever configuration file (server.properties)" +
+                            " under op-permission-level for the level given to server ops. Default: 4")
+                    .translation("worldexporter.config.server.requiredPermissionLevel")
+                    .defineInRange("requiredPermissionLevel", 4, 0, 5);
+
+            builder.pop();
+        }
     }
 
     public static class Client {

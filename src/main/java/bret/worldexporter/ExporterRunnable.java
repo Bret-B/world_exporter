@@ -3,6 +3,8 @@ package bret.worldexporter;
 import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
+import bret.worldexporter.networking.packets.PacketHandler;
+import bret.worldexporter.networking.packets.clientout.CRequestChunkPacket;
 import bret.worldexporter.util.BlockPosUtils;
 import bret.worldexporter.util.LightConnectedPathfinder;
 import bret.worldexporter.util.ReflectionHandler;
@@ -51,6 +53,9 @@ import static bret.worldexporter.Exporter.LOGGER;
 import static bret.worldexporter.Exporter.WORLD_LOWER_HEIGHT_LIMIT;
 import static bret.worldexporter.Exporter.WORLD_HEIGHT_LIMIT;
 
+// Instances of this class should not be run on the main thread.
+//  If thread safety is desired, threadSafe must be true and tasks must be added to the main thread with
+//  exporter.addMainThreadTask to run code on the main thread
 class ExporterRunnable implements Runnable {
     protected final Map<RenderType, Map<BlockPos, Pair<Integer, Integer>>> layerPosVertexCountsMap = new HashMap<>();
     protected final Map<RenderType, Map<UUID, Pair<Integer, Integer>>> layerUUIDVertexCountsMap = new HashMap<>();
@@ -60,8 +65,8 @@ class ExporterRunnable implements Runnable {
     private final Map<RenderType, ResourceLocation> renderResourceLocationMap = new HashMap<>();
     private final CustomImpl impl;
     private final Collection<Pair<BlockPos, BlockPos>> chunkBoundaries;
-    private final boolean threaded;
     private final Exporter exporter;
+    private final boolean threadSafe;
     private final int chunksPerConsume;
     private final Consumer<ArrayList<ExportChunk>> chunkConsumer;
     private final boolean renderCutout;
@@ -78,10 +83,10 @@ class ExporterRunnable implements Runnable {
 
     @SuppressWarnings("unchecked")
     public ExporterRunnable(Exporter exporter, Collection<Pair<BlockPos, BlockPos>> chunkBoundaries,
-                            boolean threaded, Consumer<ArrayList<ExportChunk>> chunkConsumer, int chunksPerConsume, @Nullable Set<Long> lightConnected) {
+                            boolean threadSafe, Consumer<ArrayList<ExportChunk>> chunkConsumer, int chunksPerConsume, @Nullable Set<Long> lightConnected) {
         this.exporter = exporter;
         this.chunkBoundaries = chunkBoundaries;
-        this.threaded = threaded;
+        this.threadSafe = threadSafe;
         this.chunkConsumer = chunkConsumer;
         this.chunksPerConsume = chunksPerConsume;
         this.lightConnected = lightConnected;
@@ -100,6 +105,30 @@ class ExporterRunnable implements Runnable {
             blockRenderChecks = new HashMap<>(mapBlock);
         } catch (Throwable e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    private boolean runThreadSafe(Runnable task) throws InterruptedException, ExecutionException {
+        if (threadSafe) {
+            RunnableFuture<Boolean> futureTask = new FutureTask<>(() -> {
+                try {
+                    task.run();
+                    return true;
+                } catch (Throwable e) {
+                    LOGGER.warn("Failed to run a task on the main thread: ", e);
+                    return false;
+                }
+            });
+            exporter.addMainThreadTask(futureTask);
+            return futureTask.get();
+        } else {
+            try {
+                task.run();
+                return true;
+            } catch (Throwable e) {
+                LOGGER.warn("Failed to run a task on thread: ", e);
+                return false;
+            }
         }
     }
 
@@ -136,13 +165,15 @@ class ExporterRunnable implements Runnable {
         ArrayList<ExportChunk> toConsume = resultChunks;
         resultChunks = new ArrayList<>();
         try {
-            if (threaded) {
-                exporter.addTask(() -> chunkConsumer.accept(toConsume));
-            } else {
-                chunkConsumer.accept(toConsume);
-            }
-        } catch (Throwable e) {
-            LOGGER.warn("Unable to handle list of ExportChunks in ExporterRunnable: ", e);
+            exporter.addMainThreadTask(() ->  {
+                try {
+                    chunkConsumer.accept(toConsume);
+                } catch (Throwable e) {
+                    LOGGER.warn("Unable to handle list of ExportChunks in ExporterRunnable consumeChunks task: ", e);
+                }
+            });
+        } catch (InterruptedException e) {
+            throw new RuntimeException("Error while trying to add exporter task in consumeChunks: ", e);
         }
     }
 
@@ -167,11 +198,13 @@ class ExporterRunnable implements Runnable {
         while (!matrixStack.clear()) matrixStack.popPose();
     }
 
-    private ArrayList<Quad> getNextChunkData(BlockPos start, BlockPos end) {
+    private ArrayList<Quad> getNextChunkData(BlockPos start, BlockPos end) throws InterruptedException, ExecutionException {
         reset();
         ArrayList<Quad> quads = new ArrayList<>();
         Chunk chunk = exporter.world.getChunkAt(start);
-        if (chunk.isEmpty()) return quads;
+        if (chunk.isEmpty() && !WorldExporter.canRequestChunks()) {
+            return quads;
+        }
 
         boolean useLightConnected = WorldExporterConfig.CLIENT.exportVisibleExteriorOnly.get();
         boolean segmentLightConnectionBuilding = WorldExporterConfig.CLIENT.segmentedExteriorPathfinding.get();
@@ -214,37 +247,18 @@ class ExporterRunnable implements Runnable {
                     if (tileEntityRenderer != null) {
                         matrixStack.pushPose();
                         matrixStack.translate(pos.getX() - exporter.playerXOffset, pos.getY(), pos.getZ() - exporter.playerZOffset);
-                        RunnableFuture<Boolean> renderTileEntity = new FutureTask<>(() -> {
-                            tileEntityRenderer.render(tileentity, partialTicks, matrixStack, impl, i, OverlayTexture.NO_OVERLAY);
-                            return true;
-                        });
-
-                        try {
-                            // This may crash on non-main threads, fallback to main thread if so
-                            renderTileEntity.run();
-                        } catch (Throwable e) {
-                            if (threaded) {
-                                try {
-                                    exporter.addTask(renderTileEntity);
-                                    if (!renderTileEntity.get())
-                                        throw new RuntimeException("Unknown error while exporting tile entity on main thread.");
-                                } catch (Throwable e2) {
-                                    LOGGER.error("Unable to export tile entity: " + tileentity + "\nDue to multiple exceptions: ", e);
-                                    LOGGER.error(e2);
-                                }
-                            } else {
-                                // the failure was not threading related, so there's nothing that can be done
-                                LOGGER.error("Unknown error while exporting tile entity on main thread: " + tileentity + '\n', e);
-                            }
+                        Runnable renderTileEntity = () -> tileEntityRenderer.render(tileentity, partialTicks, matrixStack, impl, i, OverlayTexture.NO_OVERLAY);
+                        // This may crash on non-main threads
+                        if (!runThreadSafe(renderTileEntity)) {
+                            LOGGER.error("Error while exporting tile entity: " + tileentity + '\n');
                         }
-
                         ensureEmptyMatrixStack(matrixStack);
                     }
                 }
             }
 
             // The rendering logic is roughly taken from ChunkRenderDispatcher.compile with multiple tweaks
-            FluidState fluidState = exporter.world.getFluidState(pos);
+            FluidState fluidState = chunk.getFluidState(pos);
             // TODO should check if this could cause threading issues with
             //  null model data being returned when not on main thread
             IModelData modelData = ModelDataManager.getModelData(exporter.world, pos);
@@ -259,10 +273,8 @@ class ExporterRunnable implements Runnable {
                 if (!fluidState.isEmpty() && canRenderInLayer(fluidState, rendertype)) {
                     BitSet forceRender = exporter.getForcedDirections(pos);
                     BufferBuilder bufferbuilder = impl.getBuffer(rendertype);  // automatically starts buffer
-                    try {
-                        exporter.blockRendererDispatcher.renderLiquid(pos, exporter.world, bufferbuilder, fluidState, exporter.playerXOffset, exporter.playerZOffset, forceRender);
-                    } catch (Throwable e) {
-                        LOGGER.warn("Unable to render fluid block '" + fluidState.getType().getBucket() + "' at " + pos);
+                    if (!runThreadSafe(() -> exporter.blockRendererDispatcher.renderLiquid(pos, exporter.world, bufferbuilder, fluidState, exporter.playerXOffset, exporter.playerZOffset, forceRender))) {
+                        LOGGER.error("Unable to render fluid block '" + fluidState.getType().getBucket() + "' at " + pos);
                     }
                 }
 
@@ -271,10 +283,9 @@ class ExporterRunnable implements Runnable {
                     matrixStack.translate(pos.getX() - exporter.playerXOffset, pos.getY(), pos.getZ() - exporter.playerZOffset);
                     BitSet forceRender = exporter.getForcedDirections(pos);
                     BufferBuilder bufferbuilder = impl.getBuffer(rendertype);   // automatically starts buffer
-                    try {
-                        exporter.blockRendererDispatcher.renderModel(state, pos, exporter.world, matrixStack, bufferbuilder, forceRender, random, modelData, exporter.randomize);
-                    } catch (Throwable e) {
-                        LOGGER.warn("Unable to render block '" + state + "' at " + pos, e);
+                    IModelData finalModelData = modelData;
+                    if (!runThreadSafe(() -> exporter.blockRendererDispatcher.renderModel(state, pos, exporter.world, matrixStack, bufferbuilder, forceRender, random, finalModelData, exporter.randomize))) {
+                        LOGGER.error("Unable to render block '" + state + "' at " + pos);
                     }
 
                     ensureEmptyMatrixStack(matrixStack);
@@ -293,30 +304,26 @@ class ExporterRunnable implements Runnable {
                 preEntity(entity.getUUID());
                 matrixStack.pushPose();
                 int packedLight = 15 << 20 | 15 << 4;  // .lightmap(240, 240) is full-bright
-                RunnableFuture<Boolean> renderEntity = new FutureTask<>(() -> {
-                    exporter.mc.getEntityRenderDispatcher().render(entity, entity.getX() - exporter.playerXOffset, entity.getY(),
-                            entity.getZ() - exporter.playerZOffset, entity.yRot, partialTicks, matrixStack, impl, packedLight);
-                    return true;
-                });
-                try {
-                    // optifine can cause this to crash because it calls parts of RenderSystem which verify execution on the render/main thread
-                    // causing a crash on threads other than the render thread
-                    // So far, I have seen this occur with leashed entities.
-                    // If this happens, fallback to main thread
-                    renderEntity.run();
-                } catch (Throwable e) {
-                    if (threaded) {
-                        try {
-                            exporter.addTask(renderEntity);
-                            if (!renderEntity.get())
-                                throw new RuntimeException("Unknown error while exporting entity on main thread.");
-                        } catch (Throwable e2) {
-                            LOGGER.error("Unable to export entity: " + entity + "\nDue to multiple exceptions: ", e);
-                            LOGGER.error(e2);
-                        }
+                Runnable renderEntity = () -> exporter.mc.getEntityRenderDispatcher().render(entity, entity.getX() - exporter.playerXOffset, entity.getY(),
+                        entity.getZ() - exporter.playerZOffset, entity.yRot, partialTicks, matrixStack, impl, packedLight);
+                // optifine can cause this to crash because it calls parts of RenderSystem which verify execution on the render/main thread
+                // causing a crash on threads other than the render thread
+                // So far, I have seen this occur with leashed entities.
+                // If this happens, fallback to main thread
+                if (!runThreadSafe(renderEntity)) {
+                    if (!threadSafe) {
+                        ensureEmptyMatrixStack(matrixStack);
+                        matrixStack.pushPose();
+                        exporter.addMainThreadTask(() -> {
+                            try {
+                                runThreadSafe(renderEntity);
+                            } catch (Throwable e) {
+                                LOGGER.error("Unknown error while exporting entity on main thread: " + entity + '\n', e);
+                            }
+                        });
                     } else {
                         // the failure was not threading related, so there's nothing that can be done
-                        LOGGER.error("Unknown error while exporting entity on main thread: " + entity + '\n', e);
+                        LOGGER.error("Unknown error while exporting entity on main thread: " + entity + '\n');
                     }
                 }
                 ensureEmptyMatrixStack(matrixStack);
@@ -555,14 +562,14 @@ class ExporterRunnable implements Runnable {
         for (Quad quad : quads) {
             if (!quad.hasUV()) continue;
 
-            Texture baseTexture = exporter.getTexture(quad.getResource(), threaded);
+            Texture baseTexture = exporter.getTexture(quad.getResource());
             quad.setTexture(baseTexture);
             boolean didModifyUV = false;
             // allowed error is very small by default
             float allowableErrorU = 0.0001f;
             float allowableErrorV = 0.0001f;
             if (baseTexture instanceof AtlasTexture) {
-                Pair<ResourceLocation, TextureAtlasSprite> nameAndTexture = exporter.getTextureFromAtlas(quad.getResource(), quad.getUvBounds(), threaded);
+                Pair<ResourceLocation, TextureAtlasSprite> nameAndTexture = exporter.getTextureFromAtlas(quad.getResource(), quad.getUvBounds());
                 if (nameAndTexture != null) {
                     quad.setResource(nameAndTexture.getLeft());
                     TextureAtlasSprite sprite = nameAndTexture.getRight();
@@ -611,24 +618,21 @@ class ExporterRunnable implements Runnable {
         Exporter.removeDuplicateQuads(quadsArrays);
 
         boolean fallbackSort;
-        if (threaded) {
-            // Delegates the task of sorting the quads to the main thread, which can generate the image data required for accurate sorting
-            RunnableFuture<Boolean> task = new FutureTask<>(() -> {
-                quadsArrays.forEach(quads -> exporter.sortQuads(quads, false));
-                return true;
-            });
-            try {
-                exporter.addTask(task);
-                fallbackSort = !task.get();
-            } catch (InterruptedException | ExecutionException e) {
-                LOGGER.warn("Unable to sort quads on main thread, falling back to threaded sort", e);
-                fallbackSort = true;
-            }
-        } else {
+        // Delegates the task of sorting the quads to the main thread, which can generate the image data required for accurate sorting
+        RunnableFuture<Boolean> task = new FutureTask<>(() -> {
+            quadsArrays.forEach(exporter::sortQuads);
+            return true;
+        });
+        try {
+            exporter.addMainThreadTask(task);
+            fallbackSort = !task.get();
+        } catch (InterruptedException | ExecutionException e) {
+            LOGGER.warn("Unable to sort quads on main thread, falling back to threaded sort", e);
             fallbackSort = true;
         }
         if (fallbackSort) {
-            quadsArrays.forEach(quads -> exporter.sortQuads(quads, threaded));
+            // sort on thread instead, with less accuracy
+            quadsArrays.forEach(exporter::sortQuads);
         }
 
         for (ArrayList<Quad> quads : quadsArrays) {

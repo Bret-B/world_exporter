@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class MixinWorldRenderer {
     @Inject(at = @At(value = "HEAD"), method = "setSectionDirty(IIIZ)V", cancellable = true)
     private void onSetSectionDirty(int pSectionX, int pSectionY, int pSectionZ, boolean pRerenderOnMainThread, CallbackInfo ci) {
-        if (WorldExporter.isExporting()) {
+        if (WorldExporter.isClientExporting()) {
             ci.cancel();
         }
     }

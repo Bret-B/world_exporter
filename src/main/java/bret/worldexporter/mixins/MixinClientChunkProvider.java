@@ -72,7 +72,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
     @Inject(at = @At(value = "HEAD"), method = "replaceWithPacketData", cancellable = true)
     private void onReplaceWithPacketData(int pX, int pZ, BiomeContainer biomeContainer, PacketBuffer readBuffer,
                                          CompoundNBT heightMaps, int availableSections, boolean isFullChunk, CallbackInfoReturnable<Chunk> cir) {
-        if (!WorldExporter.isExporting()) return;
+        if (!WorldExporter.isClientExporting() || !WorldExporter.canRequestChunks()) return;
 
         Chunk chunk;
         IMixinChunkArrayAccessor storageAccessor = (IMixinChunkArrayAccessor)(Object) storage;
@@ -116,7 +116,9 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
 
     @Mixin(ClientChunkProvider.ChunkArray.class)
     public static abstract class MixinChunkArray implements IMixinChunkArrayAccessor {
-        // TODO not currently thread safe
+        // TODO not currently thread safe - due to the fact that functions can fall through to the base code.
+        //  A way to make this thread safe would be to copy the regular chunks into thread safe storage and then
+        //  use only custom thread safe code while the export is being done
         // For a ChunkPos (X, Z), if createChunkIndex has been called with those coordinates then getIndex will return a
         // negative integer that will be valid for retrieving a chunk (nullable) in the additionalStorage map.
         // This also means that coordinate returns true for inRange() and other calls using that index are valid
@@ -134,6 +136,9 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         private final AtomicInteger worldexporter$negativeCount = new AtomicInteger(0);
         // TODO add a set of previous negative keys to be reused when chunks are deleted, so there is
         //  no potential to underflow
+        @Shadow
+        @Final
+        ClientChunkProvider this$0;
 
         @Override
         public int worldexporter$createChunkIndex(int pX, int pZ) {
@@ -159,11 +164,13 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         @Override
         public void worldexporter$removeChunkCustom(int index) {
             // TODO add to reused negative int key list
+            this$0.level.unload(worldexporter$additionalStorage.get(index));
             worldexporter$additionalStorage.remove(index);
         }
 
         @Override
         public void worldexporter$clear() {
+            worldexporter$additionalStorage.forEach((key, chunk) -> this$0.level.unload(chunk));
             worldexporter$negativeCount.set(0);
             worldexporter$pairToNegativeKey.clear();
             worldexporter$additionalStorage.clear();
@@ -172,7 +179,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         // return: int
         @Inject(at = @At(value = "HEAD"), method = "getIndex", cancellable = true)
         private void onGetIndex(int pX, int pZ, CallbackInfoReturnable<Integer> cir) {
-            if (!WorldExporter.isExporting()) return;
+            if (!WorldExporter.isClientExporting() || !WorldExporter.canRequestChunks()) return;
 
             long pairKey = Pairing.fromPair(pX, pZ);
             if (worldexporter$pairToNegativeKey.containsKey(pairKey)) {
@@ -186,10 +193,8 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
 
         @Inject(at = @At(value = "HEAD"), method = "replace(ILnet/minecraft/world/chunk/Chunk;)V", cancellable = true)
         private void onReplace(int pChunkIndex, Chunk pChunk, CallbackInfo ci) {
-            if (!WorldExporter.isExporting()) return;
+            if (!WorldExporter.isClientExporting() || !WorldExporter.canRequestChunks()) return;
 
-            // TODO: need to do anything like the default function related to level.unload?
-            //  probably not, since the server should be paused?
             if (worldexporter$additionalStorage.containsKey(pChunkIndex)) {
                 if (pChunk == null) {
                     worldexporter$removeChunkCustom(pChunkIndex);
@@ -213,10 +218,10 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         // return: Chunk
         @Inject(at = @At(value = "HEAD"), method = "replace(ILnet/minecraft/world/chunk/Chunk;Lnet/minecraft/world/chunk/Chunk;)Lnet/minecraft/world/chunk/Chunk;", cancellable = true)
         protected void onReplace(int pChunkIndex, Chunk pChunk, Chunk pReplaceWith, CallbackInfoReturnable<Chunk> cir) {
-            if (!WorldExporter.isExporting()) return;
+            if (!WorldExporter.isClientExporting() || !WorldExporter.canRequestChunks()) return;
 
-            // TODO: need to do anything like the default function related to level.unload?
             if (worldexporter$additionalStorage.containsKey(pChunkIndex)) {
+                this$0.level.unload(pChunk);
                 if (pReplaceWith == null) {
                     worldexporter$removeChunkCustom(pChunkIndex);
                 } else {
@@ -236,7 +241,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         // return: boolean
         @Inject(at = @At(value = "HEAD"), method = "inRange", cancellable = true)
         private void onInRange(int pX, int pZ, CallbackInfoReturnable<Boolean> cir) {
-            if (!WorldExporter.isExporting()) return;
+            if (!WorldExporter.isClientExporting() || !WorldExporter.canRequestChunks()) return;
 
             long pairKey = Pairing.fromPair(pX, pZ);
             if (worldexporter$pairToNegativeKey.containsKey(pairKey)) {
@@ -250,7 +255,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         // return: Chunk
         @Inject(at = @At(value = "HEAD"), method = "getChunk", cancellable = true)
         protected void getChunk(int pChunkIndex, CallbackInfoReturnable<Chunk> cir) {
-            if (!WorldExporter.isExporting()) return;
+            if (!WorldExporter.isClientExporting() || !WorldExporter.canRequestChunks()) return;
 
             if (worldexporter$additionalStorage.containsKey(pChunkIndex)) {
                 cir.setReturnValue(worldexporter$additionalStorage.get(pChunkIndex));

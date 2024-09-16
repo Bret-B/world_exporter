@@ -1,6 +1,7 @@
 package bret.worldexporter;
 
 import bret.worldexporter.config.WorldExporterConfig;
+import bret.worldexporter.networking.packets.IWorldExporterPacket;
 import bret.worldexporter.render.CustomBlockRendererDispatcher;
 import bret.worldexporter.util.*;
 import net.minecraft.client.Minecraft;
@@ -69,7 +70,7 @@ public class Exporter {
     private final Map<Pair<ResourceLocation, UVBounds>, Float> uvTransparencyCache = new HashMap<>();
     private final Comparator<Quad> quadComparator = getQuadSort();
     private final Comparator<Quad> quadComparatorThreaded = getQuadSortThreaded();
-    private final ArrayBlockingQueue<Runnable> mainThreadTasks = new ArrayBlockingQueue<>(10);
+    private final LinkedBlockingQueue<Runnable> mainThreadTasks = new LinkedBlockingQueue<>();
     private final ExecutorService threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
     private final int threads;
     private BlockPos startPos;  // higher values
@@ -80,6 +81,7 @@ public class Exporter {
     private boolean preShadows = mc.options.entityShadows;
     private int currentX;
     private int currentZ;
+    private static Exporter instance = null;
 
     public Exporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize, int threads) {
         OptifineReflector.init();
@@ -96,6 +98,11 @@ public class Exporter {
         endPosClampedHeight = new BlockPos(endPos.getX(), Math.max(lower, WORLD_LOWER_HEIGHT_LIMIT), endPos.getZ());
         currentX = startPos.getX();
         currentZ = startPos.getZ();
+        instance = this;
+    }
+
+    public static Exporter getInstance() {
+        return instance;
     }
 
     public BlockPos getStartPos() {
@@ -193,14 +200,15 @@ public class Exporter {
         );
     }
 
-    public int getGlTextureId(ResourceLocation resource, boolean threaded) {
-        Texture texture = getTexture(resource, threaded);
+    // must only be called on the main thread
+    public int getGlTextureId(ResourceLocation resource) {
+        Texture texture = getTexture(resource);
         if (texture == null) return -1;
         return texture.getId();
     }
 
     // fetch the Texture for a ResourceLocation from Minecraft's TextureManager, or try to load it if needed
-    public Texture getTexture(ResourceLocation resource, boolean threaded) {
+    public Texture getTexture(ResourceLocation resource) {
         TextureManager textureManager = Minecraft.getInstance().getTextureManager();
         Texture texture;
         // For some reason, the block atlas texture can rarely become null and therefore tries to be registered which
@@ -215,20 +223,17 @@ public class Exporter {
             // The texture is not currently loaded. This can be caused by entities outside render distance for example.
             // attempt to load the texture into the texture manager (see TextureManager._bind() and register())
             Texture newTexture = new SimpleTexture(resource);  // using a SimpleTexture replicates behavior of _bind()
-            if (threaded) {
-                try {
-                    RunnableFuture<Boolean> task = new FutureTask<>(() -> {
-                        synchronized (textureManager) {
-                            textureManager.register(resource, newTexture);
-                        }
-                        return true;
-                    });
-                    addTask(task);
-                    task.get();
-                } catch (InterruptedException | ExecutionException ignored) {
-                }
-            } else {
-                textureManager.register(resource, newTexture);
+            try {
+                RunnableFuture<Boolean> task = new FutureTask<>(() -> {
+                    synchronized (textureManager) {
+                        textureManager.register(resource, newTexture);
+                    }
+                    return true;
+                });
+                addMainThreadTask(task);
+                task.get();
+            } catch (InterruptedException | ExecutionException e) {
+                LOGGER.warn("Failed to perform register texture task: ", e);
             }
 
             synchronized (textureManager) {
@@ -393,8 +398,10 @@ public class Exporter {
 
     // this function MUST be run on the main thread
     public void exportQuads(Consumer<ArrayList<ExportChunk>> chunkConsumer) throws InterruptedException {
-        // shrink the initially supplied region to include only loaded chunks
-        shrinkStartEndPosBBOXCardinal();
+        // shrink the initially supplied region to include only loaded chunks, if chunks cannot be requested from server
+        if (!WorldExporter.canRequestChunks()) {
+            shrinkStartEndPosBBOXCardinal();
+        }
 
         // build the entire light connected set if segmentation is disabled
         Set<Long> lightConnected = null;
@@ -403,7 +410,7 @@ public class Exporter {
             lightConnected = lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get());
         }
 
-        boolean threaded = threads != 1;
+        boolean threadSafe = threads == 1;
         List<Pair<BlockPos, BlockPos>> allChunks = getMultipleChunkPos(Integer.MAX_VALUE);
         ArrayList<Runnable> tasks = new ArrayList<>();
         ArrayList<List<Pair<BlockPos, BlockPos>>> chunkPartitions = new ArrayList<>();
@@ -417,33 +424,28 @@ public class Exporter {
         if (chunkPartitions.size() > threads) throw new RuntimeException("chunkPartition size mismatch");
 
         for (List<Pair<BlockPos, BlockPos>> chunkPartition : chunkPartitions) {
-            tasks.add(new ExporterRunnable(this, chunkPartition, threaded, chunkConsumer, CHUNKS_PER_CONSUME, lightConnected));
+            tasks.add(new ExporterRunnable(this, chunkPartition, threadSafe, chunkConsumer, CHUNKS_PER_CONSUME, lightConnected));
         }
 
-        if (threads == 1) {
-            // basic single threaded export ran on the main thread
-            tasks.get(0).run();
-        } else {
-            // create the given amount of threads (capped to number of tasks), and start a runnable on each thread
-            int numThreads = Math.min(threads, tasks.size());
-            ExecutorService exporterThreadPool = Executors.newFixedThreadPool(numThreads);
-            LOGGER.info("Exporter created " + numThreads + " threads");
-            tasks.forEach(exporterThreadPool::submit);
-            exporterThreadPool.shutdown();
-            // wait in this loop to do tasks that are required to be run in the main thread, until threads are finished
-            while (!exporterThreadPool.isTerminated()) {
-                try {
-                    // poll here in time increments waiting for tasks; recheck if threads are done on timeout
-                    Runnable task = mainThreadTasks.poll(50, TimeUnit.MILLISECONDS);
-                    if (task != null) task.run();
-                } catch (InterruptedException ignored) {
-                }
-            }
-
-            // clear out all left-over tasks, if any
-            for (Runnable task : mainThreadTasks) {
+        // create the given amount of threads (capped to number of tasks), and start a runnable on each thread
+        int numThreads = Math.min(threads, tasks.size());
+        ExecutorService exporterThreadPool = Executors.newFixedThreadPool(numThreads);
+        LOGGER.info("Exporter created " + numThreads + " threads");
+        tasks.forEach(exporterThreadPool::submit);
+        exporterThreadPool.shutdown();
+        // wait in this loop to do tasks that are required to be run in the main thread, until threads are finished
+        while (!exporterThreadPool.isTerminated()) {
+            try {
+                // poll here in time increments waiting for tasks; recheck if threads are done on timeout
+                Runnable task = mainThreadTasks.poll(50, TimeUnit.MILLISECONDS);
                 if (task != null) task.run();
+            } catch (InterruptedException ignored) {
             }
+        }
+
+        // clear out all left-over tasks, if any
+        for (Runnable task : mainThreadTasks) {
+            if (task != null) task.run();
         }
 
         // finish any other tasks
@@ -508,7 +510,7 @@ public class Exporter {
 
     // may only be called on the main thread
     public synchronized BufferedImage getAtlasImage(ResourceLocation resource) {
-        int glTextureId = getGlTextureId(resource, false);
+        int glTextureId = getGlTextureId(resource);
         return getAtlasImage(glTextureId);
     }
 
@@ -520,8 +522,8 @@ public class Exporter {
 
     // returns null if the provided ResourceLocation does not refer to an AtlasTexture
     // could check if this is equivalent to MissingTextureSprite if this is ever a problem
-    protected Pair<ResourceLocation, TextureAtlasSprite> getTextureFromAtlas(ResourceLocation resource, UVBounds uvBounds, boolean threaded) {
-        Texture texture = getTexture(resource, threaded);
+    protected Pair<ResourceLocation, TextureAtlasSprite> getTextureFromAtlas(ResourceLocation resource, UVBounds uvBounds) {
+        Texture texture = getTexture(resource);
         if (!(texture instanceof AtlasTexture)) return null;
         AtlasTexture atlasTexture = (AtlasTexture) texture;
 
@@ -572,6 +574,7 @@ public class Exporter {
 
     // Gets the specular texture for a quad, if any, and separates it into separate images specified in this lab-pbr format:
     // https://github.com/rre36/lab-pbr/wiki/Specular-Texture-Details
+    // may only be called on the main thread
     @Nullable
     protected SpecularData getSpecularData(Quad quad, boolean perceptualRoughness) {
         BufferedImage specularImage = getImageForField(quad, OptifineReflector.multiTexSpec);
@@ -581,6 +584,7 @@ public class Exporter {
 
     // Gets the normal texture for a quad, if any, and separates it into separate images specified in this lab-pbr format:
     // https://github.com/rre36/lab-pbr/wiki/Normal-Texture-Details
+    // may only be called on the main thread
     @Nullable
     protected NormalData getNormalData(Quad quad, boolean outputOpenGLNormals) {
         BufferedImage normalImage = getImageForField(quad, OptifineReflector.multiTexNorm);
@@ -589,6 +593,7 @@ public class Exporter {
     }
 
     // expects either the norm or spec fields from OptifineReflector
+    // may only be called on the main thread
     @Nullable
     private BufferedImage getImageForField(Quad quad, Field field) {
         BufferedImage image = null;
@@ -618,17 +623,20 @@ public class Exporter {
         return image;
     }
 
+    // may only be called on the main thread
     protected BufferedImage getAtlasSubImage(TextureAtlasSprite texture, int color, int glTextureId) {
         UVBounds originalUV = new UVBounds(texture.getU0(), texture.getU1(), texture.getV0(), texture.getV1());
         return getImageFromUV(glTextureId, originalUV, color);
     }
 
+    // may only be called on the main thread
     protected BufferedImage getAtlasSubImage(TextureAtlasSprite texture, int color) {
         UVBounds originalUV = new UVBounds(texture.getU0(), texture.getU1(), texture.getV0(), texture.getV1());
         return getImageFromUV(texture.atlas().getId(), originalUV, color);
     }
 
     // Returns a subimage of a texture's image determined by uvbounds and tints with provided color
+    // may only be called on the main thread
     protected BufferedImage getImageFromUV(int glTextureId, UVBounds uvbound, int color) {
         BufferedImage baseImage = getAtlasImage(glTextureId);
         if (baseImage == null) return null;
@@ -656,11 +664,11 @@ public class Exporter {
         return textureImg;
     }
 
-    protected void sortQuads(ArrayList<Quad> quads, boolean threaded) {
-        if (threaded) {
-            quads.sort(quadComparatorThreaded);
-        } else {
+    protected void sortQuads(ArrayList<Quad> quads) {
+        if (mc.isSameThread()) {
             quads.sort(quadComparator);
+        } else {
+            quads.sort(quadComparatorThreaded);
         }
     }
 
@@ -707,8 +715,12 @@ public class Exporter {
         };
     }
 
-    protected void addTask(Runnable task) throws InterruptedException {
-        mainThreadTasks.put(task);
+    public void addMainThreadTask(Runnable task) throws InterruptedException {
+        if (mc.isSameThread()) {
+            task.run();
+        } else {
+            mainThreadTasks.put(task);
+        }
     }
 
     protected void addThreadTask(Runnable task) {

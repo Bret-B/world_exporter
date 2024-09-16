@@ -1,6 +1,7 @@
 package bret.worldexporter;
 
 import bret.worldexporter.config.WorldExporterConfig;
+import bret.worldexporter.networking.packets.PacketHandler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
@@ -19,23 +20,40 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Mod(WorldExporter.MODID)
 public class WorldExporter {
     public static final String MODID = "worldexporter";
     private static final Logger LOGGER = LogManager.getLogger(WorldExporter.MODID);
     private static final String CMD_BASE = "/worldexport";
-    private static boolean exporting = false;
+    private static boolean clientExporting = false;
+    // TODO check this from the server with a packet, false if not installed on server
     private static boolean requestChunks = true;
+    private static boolean installedOnServer = false;
+    public static AtomicBoolean serverShouldBePaused = new AtomicBoolean(false);
+    public static boolean serverExporting = false;
 
     public WorldExporter() {
         ModLoadingContext.get().registerExtensionPoint(ExtensionPoint.DISPLAYTEST, () -> Pair.of(() -> FMLNetworkConstants.IGNORESERVERONLY, (a, b) -> true));
+        PacketHandler.register();
         MinecraftForge.EVENT_BUS.register(this);
         WorldExporterConfig.register(ModLoadingContext.get());
     }
 
-    public static boolean isExporting() {
-        return exporting;
+    public static boolean isClientExporting() {
+        return clientExporting;
+    }
+
+    public static void setInstalledOnServer(boolean isInstalled) {
+        installedOnServer = isInstalled;
+    }
+    public static boolean isInstalledOnServer() {
+        return installedOnServer;
+    }
+
+    public static void setCanRequestChunks(boolean canRequest) {
+        requestChunks = canRequest;
     }
 
     public static boolean canRequestChunks() {
@@ -43,7 +61,8 @@ public class WorldExporter {
     }
 
     private static void execute(String msg, ClientPlayerEntity player) {
-        String[] params = msg.substring(CMD_BASE.length()).trim().split("\\s+");
+        String argsString = msg.substring(CMD_BASE.length()).trim();
+        String[] params = argsString.isEmpty() ? new String[] {} : argsString.split("\\s+");
         int radius = 64;
         int lower = 0;
         int upper = 255;
@@ -66,7 +85,7 @@ public class WorldExporter {
         }
         threads = Math.max(1, Math.min(32, threads));
 
-        exporting = true;
+        clientExporting = true;
         ObjExporter objExporter = new ObjExporter(player, radius, lower, upper, optimizeMesh, randomizeTextureOrientation, threads);
         boolean success;
         try {
@@ -85,7 +104,7 @@ public class WorldExporter {
             LOGGER.error("Export failed: " + e);
             success = false;
         } finally {
-            exporting = false;
+            clientExporting = false;
             if (requestChunks) {
                 ((IMixinChunkArrayAccessor)(Object) Objects.requireNonNull(Minecraft.getInstance().level).getChunkSource().storage).worldexporter$clear();
             }
@@ -97,7 +116,7 @@ public class WorldExporter {
     }
 
     private static void debug(String msg, ClientWorld world, ClientPlayerEntity player) {
-        exporting = true;
+        clientExporting = true;
         try {
 
         } catch (NullPointerException | ClassCastException e) {
@@ -105,7 +124,7 @@ public class WorldExporter {
         } catch (Throwable e) {
             throw new RuntimeException(e);
         } finally {
-            exporting = false;
+            clientExporting = false;
             if (requestChunks) {
                 ((IMixinChunkArrayAccessor)(Object) Objects.requireNonNull(Minecraft.getInstance().level).getChunkSource().storage).worldexporter$clear();
             }
