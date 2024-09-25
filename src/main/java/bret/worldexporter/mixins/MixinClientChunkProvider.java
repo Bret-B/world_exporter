@@ -1,7 +1,7 @@
 package bret.worldexporter.mixins;
 
 import bret.worldexporter.IMixinChunkArrayAccessor;
-import bret.worldexporter.WorldExporter;
+import bret.worldexporter.WorldExporterClient;
 import bret.worldexporter.util.Pairing;
 import net.minecraft.client.multiplayer.ClientChunkProvider;
 import net.minecraft.client.world.ClientWorld;
@@ -72,7 +72,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
     @Inject(at = @At(value = "HEAD"), method = "replaceWithPacketData", cancellable = true)
     private void onReplaceWithPacketData(int pX, int pZ, BiomeContainer biomeContainer, PacketBuffer readBuffer,
                                          CompoundNBT heightMaps, int availableSections, boolean isFullChunk, CallbackInfoReturnable<Chunk> cir) {
-        if (!WorldExporter.isClientExporting() || !WorldExporter.canRequestChunks()) return;
+        if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
         Chunk chunk;
         IMixinChunkArrayAccessor storageAccessor = (IMixinChunkArrayAccessor)(Object) storage;
@@ -179,7 +179,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         // return: int
         @Inject(at = @At(value = "HEAD"), method = "getIndex", cancellable = true)
         private void onGetIndex(int pX, int pZ, CallbackInfoReturnable<Integer> cir) {
-            if (!WorldExporter.isClientExporting() || !WorldExporter.canRequestChunks()) return;
+            if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
             long pairKey = Pairing.fromPair(pX, pZ);
             if (worldexporter$pairToNegativeKey.containsKey(pairKey)) {
@@ -193,7 +193,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
 
         @Inject(at = @At(value = "HEAD"), method = "replace(ILnet/minecraft/world/chunk/Chunk;)V", cancellable = true)
         private void onReplace(int pChunkIndex, Chunk pChunk, CallbackInfo ci) {
-            if (!WorldExporter.isClientExporting() || !WorldExporter.canRequestChunks()) return;
+            if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
             if (worldexporter$additionalStorage.containsKey(pChunkIndex)) {
                 if (pChunk == null) {
@@ -218,7 +218,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         // return: Chunk
         @Inject(at = @At(value = "HEAD"), method = "replace(ILnet/minecraft/world/chunk/Chunk;Lnet/minecraft/world/chunk/Chunk;)Lnet/minecraft/world/chunk/Chunk;", cancellable = true)
         protected void onReplace(int pChunkIndex, Chunk pChunk, Chunk pReplaceWith, CallbackInfoReturnable<Chunk> cir) {
-            if (!WorldExporter.isClientExporting() || !WorldExporter.canRequestChunks()) return;
+            if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
             if (worldexporter$additionalStorage.containsKey(pChunkIndex)) {
                 this$0.level.unload(pChunk);
@@ -241,7 +241,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         // return: boolean
         @Inject(at = @At(value = "HEAD"), method = "inRange", cancellable = true)
         private void onInRange(int pX, int pZ, CallbackInfoReturnable<Boolean> cir) {
-            if (!WorldExporter.isClientExporting() || !WorldExporter.canRequestChunks()) return;
+            if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
             long pairKey = Pairing.fromPair(pX, pZ);
             if (worldexporter$pairToNegativeKey.containsKey(pairKey)) {
@@ -255,7 +255,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         // return: Chunk
         @Inject(at = @At(value = "HEAD"), method = "getChunk", cancellable = true)
         protected void getChunk(int pChunkIndex, CallbackInfoReturnable<Chunk> cir) {
-            if (!WorldExporter.isClientExporting() || !WorldExporter.canRequestChunks()) return;
+            if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
             if (worldexporter$additionalStorage.containsKey(pChunkIndex)) {
                 cir.setReturnValue(worldexporter$additionalStorage.get(pChunkIndex));

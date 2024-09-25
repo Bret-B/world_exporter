@@ -22,6 +22,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import static bret.worldexporter.WorldExporter.LOGGER;
+
 public class ObjExporter extends Exporter {
     private final static String TEXTURE_DIR = "tex";
     private final File baseDir = new File(Minecraft.getInstance().gameDirectory, "worldexporter/worlddump" + java.time.LocalDateTime.now().toString().replace(':', '-'));

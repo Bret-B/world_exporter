@@ -5,7 +5,7 @@ import bret.worldexporter.legacylwjgl.Vector3f;
 
 import java.util.*;
 
-import static bret.worldexporter.Exporter.LOGGER;
+import static bret.worldexporter.WorldExporter.LOGGER;
 import static java.lang.Math.round;
 
 public class MeshOptimizer {

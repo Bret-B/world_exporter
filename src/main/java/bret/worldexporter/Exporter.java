@@ -19,8 +19,6 @@ import net.minecraft.util.Timer;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.chunk.Chunk;
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
@@ -34,10 +32,10 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
 
+import static bret.worldexporter.WorldExporter.LOGGER;
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
 public class Exporter {
-    public static final Logger LOGGER = LogManager.getLogger(WorldExporter.MODID);
     public static final int WORLD_HEIGHT_LIMIT = 255;
     public static final int WORLD_LOWER_HEIGHT_LIMIT = 0;
     private static final int CHUNKS_PER_CONSUME = 10;
@@ -58,10 +56,10 @@ public class Exporter {
     public final boolean randomize;
     public final boolean optimizeMesh;
     public final boolean sidesAreForced = WorldExporterConfig.CLIENT.exportSides.get();
-    protected final Minecraft mc = Minecraft.getInstance();
+    public final Minecraft mc = Minecraft.getInstance();
+    public final ClientWorld world = Objects.requireNonNull(mc.level);
     protected final CustomBlockRendererDispatcher blockRendererDispatcher = new CustomBlockRendererDispatcher(mc.getBlockRenderer().getBlockModelShaper(), mc.getBlockColors());
     protected final Map<Integer, BufferedImage> atlasCacheMap = new HashMap<>();
-    protected final ClientWorld world = Objects.requireNonNull(mc.level);
     protected final int playerX;
     protected final int playerZ;
     public final int playerXOffset;
@@ -82,6 +80,7 @@ public class Exporter {
     private int currentX;
     private int currentZ;
     private static Exporter instance = null;
+    private final ConcurrentLinkedQueue<IWorldExporterPacket> clientPacketsToHandle = new ConcurrentLinkedQueue<>();
 
     public Exporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize, int threads) {
         OptifineReflector.init();
@@ -399,7 +398,7 @@ public class Exporter {
     // this function MUST be run on the main thread
     public void exportQuads(Consumer<ArrayList<ExportChunk>> chunkConsumer) throws InterruptedException {
         // shrink the initially supplied region to include only loaded chunks, if chunks cannot be requested from server
-        if (!WorldExporter.canRequestChunks()) {
+        if (!WorldExporterClient.canRequestChunks()) {
             shrinkStartEndPosBBOXCardinal();
         }
 

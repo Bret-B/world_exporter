@@ -23,6 +23,8 @@ import java.util.BitSet;
 import java.util.List;
 import java.util.Random;
 
+import static bret.worldexporter.WorldExporter.LOGGER;
+
 @OnlyIn(Dist.CLIENT)
 public class CustomBlockModelRenderer {
     private final BlockColors blockColors;
@@ -83,7 +85,7 @@ public class CustomBlockModelRenderer {
                 layer = OptifineReflector.getRenderType.invoke(buffer);
                 useOptifine = true;
             } catch (Throwable e) {
-                Exporter.LOGGER.warn("Unable to get renderEnv/layer info even though Optifine is valid", e);
+                LOGGER.warn("Unable to get renderEnv/layer info even though Optifine is valid", e);
             }
         }
 
@@ -96,7 +98,7 @@ public class CustomBlockModelRenderer {
                     try {
                         list = (List<BakedQuad>) OptifineReflector.getRenderQuads.invoke(list, worldIn, stateIn, posIn, direction, layer, rand, renderEnv);
                     } catch (Throwable e) {
-                        Exporter.LOGGER.warn("Unable to get modified quad list even though Optifine is valid", e);
+                        LOGGER.warn("Unable to get modified quad list even though Optifine is valid", e);
                     }
                 }
                 this.renderModelFaceFlat(worldIn, stateIn, posIn, i, combinedOverlayIn, false, matrixStackIn, buffer, list, bitset);
@@ -111,7 +113,7 @@ public class CustomBlockModelRenderer {
                 try {
                     list1 = (List<BakedQuad>) OptifineReflector.getRenderQuads.invoke(list1, worldIn, stateIn, posIn, (Direction) null, layer, rand, renderEnv);
                 } catch (Throwable e) {
-                    Exporter.LOGGER.warn("Unable to get modified quad list even though Optifine is valid", e);
+                    LOGGER.warn("Unable to get modified quad list even though Optifine is valid", e);
                 }
             }
             this.renderModelFaceFlat(worldIn, stateIn, posIn, -1, combinedOverlayIn, true, matrixStackIn, buffer, list1, bitset);

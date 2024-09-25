@@ -3,8 +3,6 @@ package bret.worldexporter;
 import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
-import bret.worldexporter.networking.packets.PacketHandler;
-import bret.worldexporter.networking.packets.clientout.CRequestChunkPacket;
 import bret.worldexporter.util.BlockPosUtils;
 import bret.worldexporter.util.LightConnectedPathfinder;
 import bret.worldexporter.util.ReflectionHandler;
@@ -49,9 +47,9 @@ import java.util.concurrent.RunnableFuture;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-import static bret.worldexporter.Exporter.LOGGER;
-import static bret.worldexporter.Exporter.WORLD_LOWER_HEIGHT_LIMIT;
 import static bret.worldexporter.Exporter.WORLD_HEIGHT_LIMIT;
+import static bret.worldexporter.Exporter.WORLD_LOWER_HEIGHT_LIMIT;
+import static bret.worldexporter.WorldExporter.LOGGER;
 
 // Instances of this class should not be run on the main thread.
 //  If thread safety is desired, threadSafe must be true and tasks must be added to the main thread with
@@ -202,7 +200,7 @@ class ExporterRunnable implements Runnable {
         reset();
         ArrayList<Quad> quads = new ArrayList<>();
         Chunk chunk = exporter.world.getChunkAt(start);
-        if (chunk.isEmpty() && !WorldExporter.canRequestChunks()) {
+        if (chunk.isEmpty() && !WorldExporterClient.canRequestChunks()) {
             return quads;
         }
 

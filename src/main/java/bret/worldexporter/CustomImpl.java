@@ -14,7 +14,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import javax.annotation.Nonnull;
 import java.util.*;
 
-import static bret.worldexporter.Exporter.LOGGER;
+import static bret.worldexporter.WorldExporter.LOGGER;
 
 @OnlyIn(Dist.CLIENT)
 public class CustomImpl implements IRenderTypeBuffer {
