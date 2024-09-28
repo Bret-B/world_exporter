@@ -1,4 +1,4 @@
-package bret.worldexporter;
+package bret.worldexporter.mixinsadditional;
 
 import net.minecraft.world.chunk.Chunk;
 

@@ -1,7 +1,6 @@
 package bret.worldexporter;
 
 import bret.worldexporter.config.WorldExporterConfig;
-import bret.worldexporter.networking.packets.IWorldExporterPacket;
 import bret.worldexporter.render.CustomBlockRendererDispatcher;
 import bret.worldexporter.util.*;
 import net.minecraft.client.Minecraft;
@@ -30,6 +29,7 @@ import java.lang.reflect.Field;
 import java.nio.IntBuffer;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static bret.worldexporter.WorldExporter.LOGGER;
@@ -80,7 +80,6 @@ public class Exporter {
     private int currentX;
     private int currentZ;
     private static Exporter instance = null;
-    private final ConcurrentLinkedQueue<IWorldExporterPacket> clientPacketsToHandle = new ConcurrentLinkedQueue<>();
 
     public Exporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize, int threads) {
         OptifineReflector.init();
@@ -402,11 +401,21 @@ public class Exporter {
             shrinkStartEndPosBBOXCardinal();
         }
 
-        // build the entire light connected set if segmentation is disabled
-        Set<Long> lightConnected = null;
+        // Build the entire light connected set if segmentation is disabled.
+        AtomicReference<Set<Long>> lightConnected = new AtomicReference<>();
         if (WorldExporterConfig.CLIENT.exportVisibleExteriorOnly.get() && !WorldExporterConfig.CLIENT.segmentedExteriorPathfinding.get()) {
-            LightConnectedPathfinder lightFinder = new LightConnectedPathfinder(this, world);
-            lightConnected = lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get());
+            Runnable task = () -> {
+                LightConnectedPathfinder lightFinder = new LightConnectedPathfinder(this, world);
+                lightConnected.set(lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get()));
+            };
+            if (WorldExporterClient.canRequestChunks()) {
+                ChunkThreadSyncManager.reset(1);
+                // this needs to be done on another thread so that chunk requests can be processed here on the main thread
+                (new Thread(task)).start();
+                ChunkThreadSyncManager.mainThreadEventLoopOrReturn(() -> lightConnected.get() != null, false);
+            } else {
+                task.run();
+            }
         }
 
         boolean threadSafe = threads == 1;
@@ -423,11 +432,12 @@ public class Exporter {
         if (chunkPartitions.size() > threads) throw new RuntimeException("chunkPartition size mismatch");
 
         for (List<Pair<BlockPos, BlockPos>> chunkPartition : chunkPartitions) {
-            tasks.add(new ExporterRunnable(this, chunkPartition, threadSafe, chunkConsumer, CHUNKS_PER_CONSUME, lightConnected));
+            tasks.add(new ExporterRunnable(this, chunkPartition, threadSafe, chunkConsumer, CHUNKS_PER_CONSUME, lightConnected.get()));
         }
 
         // create the given amount of threads (capped to number of tasks), and start a runnable on each thread
         int numThreads = Math.min(threads, tasks.size());
+        ChunkThreadSyncManager.reset(numThreads);
         ExecutorService exporterThreadPool = Executors.newFixedThreadPool(numThreads);
         LOGGER.info("Exporter created " + numThreads + " threads");
         tasks.forEach(exporterThreadPool::submit);
@@ -439,6 +449,10 @@ public class Exporter {
                 Runnable task = mainThreadTasks.poll(50, TimeUnit.MILLISECONDS);
                 if (task != null) task.run();
             } catch (InterruptedException ignored) {
+                // if the sync can be done now (all threads are waiting), execute the queued tasks and then return
+                if (ChunkThreadSyncManager.shouldSyncNow()) {
+                    ChunkThreadSyncManager.mainThreadEventLoopOrReturn(ChunkThreadSyncManager::isEmpty, true);
+                }
             }
         }
 
@@ -446,7 +460,8 @@ public class Exporter {
         for (Runnable task : mainThreadTasks) {
             if (task != null) task.run();
         }
-
+        mainThreadTasks.clear();
+        ChunkThreadSyncManager.completeAllTasks();
         // finish any other tasks
         threadPool.shutdown();
         //noinspection ResultOfMethodCallIgnored

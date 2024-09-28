@@ -10,10 +10,10 @@
     "MixinClientChunkProvider",
     "MixinClientChunkProvider$MixinChunkArray",
     "MixinClientPlayNetHandler",
-    "MixinWorldRenderer"
+    "MixinWorldRenderer",
+    "MixinPacketThreadUtil"
   ],
   "server": [
-
   ],
   "injectors": {
     "defaultRequire": 1

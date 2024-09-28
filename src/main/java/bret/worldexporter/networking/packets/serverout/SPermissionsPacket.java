@@ -1,5 +1,6 @@
 package bret.worldexporter.networking.packets.serverout;
 
+import bret.worldexporter.WorldExporter;
 import bret.worldexporter.WorldExporterClient;
 import net.minecraft.network.PacketBuffer;
 import net.minecraftforge.fml.network.NetworkEvent;
@@ -28,6 +29,8 @@ public class SPermissionsPacket {
     }
 
     public static void handle(SPermissionsPacket packet, Supplier<NetworkEvent.Context> ctx) {
+        ctx.get().setPacketHandled(true);
+        // WorldExporter.LOGGER.info("handling permissions packet on client");
         WorldExporterClient.setCanRequestChunks(packet.canRequestChunks);
         WorldExporterClient.setCanPauseServer(packet.canPause);
         WorldExporterClient.receivedPermissions.set(true);

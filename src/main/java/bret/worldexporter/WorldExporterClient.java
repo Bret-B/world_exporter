@@ -1,6 +1,7 @@
 package bret.worldexporter;
 
 import bret.worldexporter.config.WorldExporterConfig;
+import bret.worldexporter.mixinsadditional.IMixinChunkArrayAccessor;
 import bret.worldexporter.networking.packets.PacketHandler;
 import bret.worldexporter.networking.packets.clientout.CCheckPermissionsPacket;
 import net.minecraft.client.Minecraft;
@@ -12,7 +13,6 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientChatEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -28,7 +28,7 @@ public class WorldExporterClient {
     private static boolean clientExporting = false;
     private static boolean canRequestChunks = false;
     private static boolean canPauseServer = false;
-    private static boolean installedOnServer = false;
+    private static boolean installedOnServer = false;  // set during PacketHandler setup
     public static final AtomicBoolean receivedPermissions = new AtomicBoolean(false);
     public static final CyclicBarrier receivedPermissionsBarrier = new CyclicBarrier(2);
 
@@ -49,7 +49,7 @@ public class WorldExporterClient {
     }
 
     public static boolean canRequestChunks() {
-        return canRequestChunks;
+        return installedOnServer && canRequestChunks;
     }
 
     public static void setCanPauseServer(boolean canPause) {
@@ -61,6 +61,8 @@ public class WorldExporterClient {
     }
 
     private static void execute(String msg, ClientPlayerEntity player) {
+        clientExporting = true;
+
         // check permissions from server
         receivedPermissions.set(false);
         receivedPermissionsBarrier.reset();
@@ -68,12 +70,10 @@ public class WorldExporterClient {
             //noinspection InstantiationOfUtilityClass
             PacketHandler.INSTANCE.sendToServer(new CCheckPermissionsPacket());
             try {
-//                receivedPermissions.wait(1000L * 15L);
-                //noinspection ResultOfMethodCallIgnored
-                receivedPermissionsBarrier.await(1000L * 15L, TimeUnit.MILLISECONDS);
+                receivedPermissionsBarrier.await(1000L * 10L, TimeUnit.MILLISECONDS);
             } catch (InterruptedException | BrokenBarrierException | TimeoutException e) {
                 if (!receivedPermissions.get()) {
-                    LOGGER.warn("Did not receive permissions response from server within 8s, disabling server-sided features for this export");
+                    LOGGER.warn("Did not receive permissions response from server in time, disabling server-sided features for this export");
                     canPauseServer = false;
                     canRequestChunks = false;
                 }
@@ -102,9 +102,8 @@ public class WorldExporterClient {
             );
             return;
         }
-        threads = Math.max(1, Math.min(32, threads));
 
-        clientExporting = true;
+        threads = Math.max(1, Math.min(32, threads));
         ObjExporter objExporter = new ObjExporter(player, radius, lower, upper, optimizeMesh, randomizeTextureOrientation, threads);
         boolean success;
         try {
@@ -124,7 +123,7 @@ public class WorldExporterClient {
             success = false;
         } finally {
             clientExporting = false;
-            if (canRequestChunks) {
+            if (canRequestChunks()) {
                 ((IMixinChunkArrayAccessor) (Object) Objects.requireNonNull(Minecraft.getInstance().level).getChunkSource().storage).worldexporter$clear();
             }
         }
@@ -132,22 +131,6 @@ public class WorldExporterClient {
         System.gc();
         player.sendMessage(new StringTextComponent(
                 success ? "Export successful." : "An error occurred when exporting the world."), Util.NIL_UUID);
-    }
-
-    private static void debug(String msg, ClientWorld world, ClientPlayerEntity player) {
-        clientExporting = true;
-        try {
-
-        } catch (NullPointerException | ClassCastException e) {
-            LOGGER.warn("Unable to change pause status of internal server");
-        } catch (Throwable e) {
-            throw new RuntimeException(e);
-        } finally {
-            clientExporting = false;
-            if (canRequestChunks) {
-                ((IMixinChunkArrayAccessor) (Object) Objects.requireNonNull(Minecraft.getInstance().level).getChunkSource().storage).worldexporter$clear();
-            }
-        }
     }
 
     @SubscribeEvent
@@ -162,11 +145,6 @@ public class WorldExporterClient {
         if (msg.startsWith(CMD_BASE)) {
             event.setCanceled(true);
             execute(msg, player);
-        }
-
-        if (msg.startsWith("/wedebug")) {
-            event.setCanceled(true);
-            debug(msg, world, player);
         }
     }
 }

@@ -4,6 +4,7 @@ import bret.worldexporter.WorldExporterClient;
 import bret.worldexporter.networking.packets.clientout.CCheckPermissionsPacket;
 import bret.worldexporter.networking.packets.clientout.CRequestChunkPacket;
 import bret.worldexporter.networking.packets.clientout.CSetExportStatePacket;
+import bret.worldexporter.networking.packets.serverout.SChunkDataPacketCustom;
 import bret.worldexporter.networking.packets.serverout.SPermissionsPacket;
 import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.fml.network.NetworkRegistry;
@@ -13,8 +14,9 @@ import static bret.worldexporter.WorldExporter.MODID;
 
 public class PacketHandler {
     private static final String PROTOCOL_VERSION = "0";
+    public static final ResourceLocation CHANNEL_RESOURCE = new ResourceLocation(MODID, "main");
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
-            new ResourceLocation(MODID, "main"),
+            CHANNEL_RESOURCE,
             () -> PROTOCOL_VERSION,
             PacketHandler::checkServersProtocolVersion,  // the server is never required to have the mod, but check if it does
             (String version) -> true  // the client is never required to have the mod
@@ -36,5 +38,6 @@ public class PacketHandler {
 
         // server to client
         INSTANCE.registerMessage(index++, SPermissionsPacket.class, SPermissionsPacket::encode, SPermissionsPacket::decode, SPermissionsPacket::handle);
+        INSTANCE.registerMessage(index++, SChunkDataPacketCustom.class, SChunkDataPacketCustom::encode, SChunkDataPacketCustom::decode, SChunkDataPacketCustom::handle);
     }
 }

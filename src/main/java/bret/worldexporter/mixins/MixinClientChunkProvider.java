@@ -1,6 +1,6 @@
 package bret.worldexporter.mixins;
 
-import bret.worldexporter.IMixinChunkArrayAccessor;
+import bret.worldexporter.mixinsadditional.IMixinChunkArrayAccessor;
 import bret.worldexporter.WorldExporterClient;
 import bret.worldexporter.util.Pairing;
 import net.minecraft.client.multiplayer.ClientChunkProvider;
