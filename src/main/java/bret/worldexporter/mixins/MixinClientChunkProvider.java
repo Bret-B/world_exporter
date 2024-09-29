@@ -1,7 +1,8 @@
 package bret.worldexporter.mixins;
 
-import bret.worldexporter.mixinsadditional.IMixinChunkArrayAccessor;
+import bret.worldexporter.ChunkThreadSyncManager;
 import bret.worldexporter.WorldExporterClient;
+import bret.worldexporter.mixinsadditional.IMixinChunkArrayAccessor;
 import bret.worldexporter.util.Pairing;
 import net.minecraft.client.multiplayer.ClientChunkProvider;
 import net.minecraft.client.world.ClientWorld;
@@ -13,6 +14,7 @@ import net.minecraft.world.biome.BiomeContainer;
 import net.minecraft.world.chunk.AbstractChunkProvider;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.ChunkSection;
+import net.minecraft.world.chunk.ChunkStatus;
 import net.minecraft.world.lighting.WorldLightManager;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -23,6 +25,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -34,22 +37,33 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
     public volatile ClientChunkProvider.ChunkArray storage;
     @Final
     @Shadow
-    private ClientWorld level;
+    public ClientWorld level;
 
     // return: Chunk
-//    @Inject(at = @At(value = "HEAD"), method = "getChunk(IILnet/minecraft/world/chunk/ChunkStatus;Z)Lnet/minecraft/world/chunk/Chunk;", cancellable = true)
-//    private void onGetChunk(int pChunkX, int pChunkZ, ChunkStatus pRequiredStatus, boolean pLoad, CallbackInfoReturnable<Chunk> cir) {
+    @Inject(at = @At(value = "HEAD"), method = "getChunk(IILnet/minecraft/world/chunk/ChunkStatus;Z)Lnet/minecraft/world/chunk/Chunk;")
+    private void onGetChunk(int pChunkX, int pChunkZ, ChunkStatus pRequiredStatus, boolean pLoad, CallbackInfoReturnable<Chunk> cir) {
+        if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
+
+//        if (!ChunkThreadSyncManager.isPending(pChunkX, pChunkZ) &&
+        if ((!storage.inRange(pChunkX, pChunkZ) ||
+                (storage.inRange(pChunkX, pChunkZ) &&
+                        storage.getIndex(pChunkX, pChunkZ) >= 0 &&
+                        storage.chunks.get(storage.getIndex(pChunkX, pChunkZ)) == null))) {
+            // request the chunk from the server (if not already done) and block appropriately until it has been added
+            // then, fallthrough to the regular code which should properly return the chunk
+            // WorldExporter.LOGGER.info(String.format("Client requesting chunk from server: x:%d z:%d", pChunkX, pChunkZ));
+            ChunkThreadSyncManager.requestChunk(pChunkX, pChunkZ);
+        }
+        // fallthrough
+//        if (this.storage.inRange(pChunkX, pChunkZ)) {
+//            Chunk chunk = this.storage.getChunk(this.storage.getIndex(pChunkX, pChunkZ));
+//            if (isValidChunk(chunk, pChunkX, pChunkZ)) {
+//                return chunk;
+//            }
+//        }
 //
-//
-////        if (this.storage.inRange(pChunkX, pChunkZ)) {
-////            Chunk chunk = this.storage.getChunk(this.storage.getIndex(pChunkX, pChunkZ));
-////            if (isValidChunk(chunk, pChunkX, pChunkZ)) {
-////                return chunk;
-////            }
-////        }
-////
-////        return pLoad ? this.emptyChunk : null;
-//    }
+//        return pLoad ? this.emptyChunk : null;
+    }
 
 //    @Inject(at = @At(value = "HEAD"), method = "drop", cancellable = true)
 //    public void drop(int pX, int pZ, CallbackInfo ci) {
@@ -70,23 +84,37 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
 
     // return: Chunk
     @Inject(at = @At(value = "HEAD"), method = "replaceWithPacketData", cancellable = true)
-    private void onReplaceWithPacketData(int pX, int pZ, BiomeContainer biomeContainer, PacketBuffer readBuffer,
+    private void onReplaceWithPacketData(int pX, int pZ, @Nullable BiomeContainer biomeContainer, PacketBuffer readBuffer,
                                          CompoundNBT heightMaps, int availableSections, boolean isFullChunk, CallbackInfoReturnable<Chunk> cir) {
         if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
         Chunk chunk;
-        IMixinChunkArrayAccessor storageAccessor = (IMixinChunkArrayAccessor)(Object) storage;
+        IMixinChunkArrayAccessor storageAccessor = (IMixinChunkArrayAccessor) (Object) storage;
+        boolean addingCustom = isFullChunk;
         if (!storage.inRange(pX, pZ)) {
             // client is exporting and a chunk is being added outside the view range to the custom storage
+            addingCustom = true;
+            //noinspection DataFlowIssue
             chunk = new Chunk(level, new ChunkPos(pX, pZ), biomeContainer);
-            @SuppressWarnings("DataFlowIssue")
+            //noinspection DataFlowIssue
             int index = storageAccessor.worldexporter$createChunkIndex(pX, pZ);
             storageAccessor.worldexporter$addChunk(index, chunk);
         }
 
-        chunk = this.getChunkNow(pX, pZ);
-        if (!isFullChunk && ClientChunkProvider.isValidChunk(chunk, pX, pZ)) {
-            chunk.replaceWithPacketData(biomeContainer, readBuffer, heightMaps, availableSections);
+        if (!addingCustom) {
+            chunk = this.getChunkNow(pX, pZ);
+            if (ClientChunkProvider.isValidChunk(chunk, pX, pZ)) {
+                chunk.replaceWithPacketData(biomeContainer, readBuffer, heightMaps, availableSections);
+            } else {
+                if (biomeContainer == null) {
+                    cir.setReturnValue(null);
+                    return;
+                }
+
+                chunk = new Chunk(level, new ChunkPos(pX, pZ), biomeContainer);
+                chunk.replaceWithPacketData(biomeContainer, readBuffer, heightMaps, availableSections);
+                storage.replace(storage.getIndex(pX, pZ), chunk);
+            }
         } else {
             if (biomeContainer == null) {
                 cir.setReturnValue(null);
@@ -102,7 +130,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         WorldLightManager worldlightmanager = this.getLightEngine();
         worldlightmanager.enableLightSources(new ChunkPos(pX, pZ), true);
 
-        for(int j = 0; j < achunksection.length; ++j) {
+        for (int j = 0; j < achunksection.length; ++j) {
             ChunkSection chunksection = achunksection[j];
             worldlightmanager.updateSectionStatus(SectionPos.of(pX, j, pZ), ChunkSection.isEmpty(chunksection));
         }

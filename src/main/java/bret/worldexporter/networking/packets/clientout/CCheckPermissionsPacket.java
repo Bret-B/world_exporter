@@ -1,13 +1,11 @@
 package bret.worldexporter.networking.packets.clientout;
 
-import bret.worldexporter.WorldExporter;
 import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.networking.packets.PacketHandler;
 import bret.worldexporter.networking.packets.serverout.SPermissionsPacket;
 import net.minecraft.entity.player.ServerPlayerEntity;
 import net.minecraft.network.PacketBuffer;
 import net.minecraftforge.fml.network.NetworkEvent;
-import net.minecraftforge.fml.network.PacketDistributor;
 
 import java.util.function.Supplier;
 
@@ -31,10 +29,7 @@ public class CCheckPermissionsPacket {
         }
 
         boolean hasPerms = sender.hasPermissions(WorldExporterConfig.SERVER.requiredPermissionLevel.get());
-        WorldExporter.LOGGER.info(String.format("Sending permission response packet from server: hasPerms is %s", hasPerms ? "true" : "false"));
-        PacketHandler.INSTANCE.send(PacketDistributor.PLAYER.with(() -> sender), new SPermissionsPacket(
-                hasPerms,
-                hasPerms && WorldExporterConfig.SERVER.pauseEnabled.get()
-        ));
+        // WorldExporter.LOGGER.info(String.format("Sending permission response packet from server: hasPerms is %s", hasPerms ? "true" : "false"));
+        PacketHandler.sendToPlayer(sender, new SPermissionsPacket(hasPerms, hasPerms && WorldExporterConfig.SERVER.pauseEnabled.get()));
     }
 }

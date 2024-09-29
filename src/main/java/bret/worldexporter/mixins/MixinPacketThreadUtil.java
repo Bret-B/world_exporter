@@ -1,6 +1,5 @@
 package bret.worldexporter.mixins;
 
-import bret.worldexporter.WorldExporter;
 import bret.worldexporter.WorldExporterClient;
 import bret.worldexporter.networking.packets.PacketHandler;
 import net.minecraft.network.INetHandler;

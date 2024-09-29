@@ -13,22 +13,18 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-
 @Mod(WorldExporter.MODID)
 public class WorldExporter {
     public static final String MODID = "worldexporter";
     public static final Logger LOGGER = LogManager.getLogger(MODID);
 
-    // touched only by the server side
-    public static AtomicBoolean serverShouldBePaused = new AtomicBoolean(false);
-    public static boolean serverExporting = false;
-
     public WorldExporter() {
         ModLoadingContext.get().registerExtensionPoint(ExtensionPoint.DISPLAYTEST, () -> Pair.of(() -> FMLNetworkConstants.IGNORESERVERONLY, (a, b) -> true));
         PacketHandler.register();
-        // register the client class only when on the client - prevent classloading errors on the server
+        // register the client only when on the client - prevent classloading errors on the server
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> MinecraftForge.EVENT_BUS.register(WorldExporterClient.class));
+        // for this to work with an integrated server, it has to be loaded on dist CLIENT (as well as dedicated)
+        MinecraftForge.EVENT_BUS.register(WorldExporterServer.class);
         WorldExporterConfig.register(ModLoadingContext.get());
     }
 }

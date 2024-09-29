@@ -1,6 +1,5 @@
 package bret.worldexporter.networking.packets.serverout;
 
-import bret.worldexporter.WorldExporter;
 import bret.worldexporter.WorldExporterClient;
 import net.minecraft.network.PacketBuffer;
 import net.minecraftforge.fml.network.NetworkEvent;

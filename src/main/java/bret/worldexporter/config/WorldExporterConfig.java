@@ -89,6 +89,7 @@ public class WorldExporterConfig {
         public final BooleanValue segmentedExteriorPathfinding;
         public final IntValue segmentChunkRadius;
         public final BooleanValue exportSides;
+        public final BooleanValue requestPause;
 
         Client(final ForgeConfigSpec.Builder builder) {
             builder.comment("Client-only settings").push("client");
@@ -199,6 +200,11 @@ public class WorldExporterConfig {
                             " That is, the blocks along the side of the export will always be exported even if they connect to other solid blocks.")
                     .translation("worldexporter.config.client.exportSides")
                     .define("exportSides", true);
+
+            requestPause = builder
+                    .comment("Request to pause the server during exports, if the client has permission from the server.")
+                    .translation("worldexporter.config.client.requestPause")
+                    .define("requestPause", true);
 
             builder.pop();
         }

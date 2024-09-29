@@ -5,13 +5,14 @@
   "compatibilityLevel": "JAVA_8",
   "refmap": "worldexporter.mixin.refmap.json",
   "mixins": [
+    "MixinMinecraftServer"
   ],
   "client": [
     "MixinClientChunkProvider",
     "MixinClientChunkProvider$MixinChunkArray",
     "MixinClientPlayNetHandler",
-    "MixinWorldRenderer",
-    "MixinPacketThreadUtil"
+    "MixinPacketThreadUtil",
+    "MixinWorldRenderer"
   ],
   "server": [
   ],

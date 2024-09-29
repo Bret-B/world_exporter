@@ -1,20 +1,13 @@
 package bret.worldexporter.networking.packets.serverout;
 
 import bret.worldexporter.ChunkThreadSyncManager;
-import bret.worldexporter.WorldExporter;
-import bret.worldexporter.config.WorldExporterConfig;
-import bret.worldexporter.networking.packets.PacketHandler;
-import bret.worldexporter.networking.packets.clientout.CCheckPermissionsPacket;
+import bret.worldexporter.networking.packets.ReceivedChunkEnum;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.network.play.IClientPlayNetHandler;
-import net.minecraft.entity.player.ServerPlayerEntity;
 import net.minecraft.network.PacketBuffer;
 import net.minecraft.network.play.server.SChunkDataPacket;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraftforge.fml.network.NetworkEvent;
-import net.minecraftforge.fml.network.PacketDistributor;
 
-import javax.annotation.Nonnull;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -51,9 +44,12 @@ public class SChunkDataPacketCustom {
     }
 
     public static void handle(SChunkDataPacketCustom packet, Supplier<NetworkEvent.Context> ctx) {
+        ctx.get().setPacketHandled(true);
+        // WorldExporter.LOGGER.info("Received SChunkDataPacketCustom");
         ChunkThreadSyncManager.add(() -> {
+            // WorldExporter.LOGGER.info("Handling SChunkDataPacketCustom");
             packet.nested.handle(Objects.requireNonNull(Minecraft.getInstance().getConnection()));
-            ChunkThreadSyncManager.notifyChunkReceived(packet.nested.getX(), packet.nested.getZ());
+            ChunkThreadSyncManager.notifyChunkReceived(packet.nested.getX(), packet.nested.getZ(), ReceivedChunkEnum.CHUNK_DATA);
         });
     }
 }

@@ -103,6 +103,10 @@ public class Exporter {
         return instance;
     }
 
+    public LinkedBlockingQueue<Runnable> getMainThreadTasks() {
+        return mainThreadTasks;
+    }
+
     public BlockPos getStartPos() {
         return startPos;
     }
@@ -269,7 +273,7 @@ public class Exporter {
         mc.options.entityShadows = false;
 
         // pause the IntegratedServer, if there is one
-        setPause(true);
+        // setPause(true);
     }
 
     // required to reset MC options related rendering
@@ -278,7 +282,7 @@ public class Exporter {
         mc.options.entityShadows = preShadows;
 
         // resume the IntegratedServer, if there is one
-        setPause(false);
+        // setPause(false);
     }
 
     public boolean isOnExportEdge(BlockPos pos) {
@@ -412,7 +416,7 @@ public class Exporter {
                 ChunkThreadSyncManager.reset(1);
                 // this needs to be done on another thread so that chunk requests can be processed here on the main thread
                 (new Thread(task)).start();
-                ChunkThreadSyncManager.mainThreadEventLoopOrReturn(() -> lightConnected.get() != null, false);
+                ChunkThreadSyncManager.mainThreadEventLoop(() -> lightConnected.get() != null, null, false);
             } else {
                 task.run();
             }
@@ -447,13 +451,13 @@ public class Exporter {
             try {
                 // poll here in time increments waiting for tasks; recheck if threads are done on timeout
                 Runnable task = mainThreadTasks.poll(50, TimeUnit.MILLISECONDS);
-                if (task != null) task.run();
-            } catch (InterruptedException ignored) {
-                // if the sync can be done now (all threads are waiting), execute the queued tasks and then return
-                if (ChunkThreadSyncManager.shouldSyncNow()) {
-                    ChunkThreadSyncManager.mainThreadEventLoopOrReturn(ChunkThreadSyncManager::isEmpty, true);
+                if (task != null) {
+                    task.run();
+                } else {
+                    // if the sync can be done now (all threads are waiting), execute the queued tasks and then return
+                    ChunkThreadSyncManager.mainThreadEventLoop(ChunkThreadSyncManager::isEmpty, mainThreadTasks, true);
                 }
-            }
+            } catch (InterruptedException ignored) {}
         }
 
         // clear out all left-over tasks, if any

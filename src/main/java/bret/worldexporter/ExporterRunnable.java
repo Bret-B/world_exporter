@@ -135,6 +135,7 @@ class ExporterRunnable implements Runnable {
         try {
             int processedChunks = 0;
             for (Pair<BlockPos, BlockPos> startEnd : chunkBoundaries) {
+                ChunkThreadSyncManager.threadCheckpoint();
                 ArrayList<Quad> chunkQuads = getNextChunkData(startEnd.getLeft(), startEnd.getRight());
                 int chunkX = startEnd.getLeft().getX() >> 4;
                 int chunkZ = startEnd.getLeft().getZ() >> 4;
@@ -157,6 +158,9 @@ class ExporterRunnable implements Runnable {
         } catch (Throwable e) {
             LOGGER.error("ExporterRunnable crashed while exporting: ", e);
         }
+
+        // The thread is done: release it from the semaphore so that it doesn't block other threads in a finished state
+        ChunkThreadSyncManager.release();
     }
 
     private void consumeChunks() {

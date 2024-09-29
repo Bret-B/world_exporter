@@ -6,8 +6,12 @@ import bret.worldexporter.networking.packets.clientout.CRequestChunkPacket;
 import bret.worldexporter.networking.packets.clientout.CSetExportStatePacket;
 import bret.worldexporter.networking.packets.serverout.SChunkDataPacketCustom;
 import bret.worldexporter.networking.packets.serverout.SPermissionsPacket;
+import bret.worldexporter.networking.packets.serverout.SSetExportStateResponsePacket;
+import bret.worldexporter.networking.packets.serverout.SUpdateLightPacketCustom;
+import net.minecraft.entity.player.ServerPlayerEntity;
 import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.fml.network.NetworkRegistry;
+import net.minecraftforge.fml.network.PacketDistributor;
 import net.minecraftforge.fml.network.simple.SimpleChannel;
 
 import static bret.worldexporter.WorldExporter.MODID;
@@ -29,6 +33,10 @@ public class PacketHandler {
         return true;
     }
 
+    public static <MSG> void sendToPlayer(ServerPlayerEntity player, MSG packet) {
+        INSTANCE.send(PacketDistributor.PLAYER.with(() -> player), packet);
+    }
+
     public static void register() {
         int index = 0;
         // client to server
@@ -38,6 +46,8 @@ public class PacketHandler {
 
         // server to client
         INSTANCE.registerMessage(index++, SPermissionsPacket.class, SPermissionsPacket::encode, SPermissionsPacket::decode, SPermissionsPacket::handle);
+        INSTANCE.registerMessage(index++, SSetExportStateResponsePacket.class, SSetExportStateResponsePacket::encode, SSetExportStateResponsePacket::decode, SSetExportStateResponsePacket::handle);
         INSTANCE.registerMessage(index++, SChunkDataPacketCustom.class, SChunkDataPacketCustom::encode, SChunkDataPacketCustom::decode, SChunkDataPacketCustom::handle);
+        INSTANCE.registerMessage(index++, SUpdateLightPacketCustom.class, SUpdateLightPacketCustom::encode, SUpdateLightPacketCustom::decode, SUpdateLightPacketCustom::handle);
     }
 }

@@ -4,6 +4,7 @@ import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.mixinsadditional.IMixinChunkArrayAccessor;
 import bret.worldexporter.networking.packets.PacketHandler;
 import bret.worldexporter.networking.packets.clientout.CCheckPermissionsPacket;
+import bret.worldexporter.networking.packets.clientout.CSetExportStatePacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
@@ -16,7 +17,10 @@ import net.minecraftforge.fml.common.Mod;
 
 import java.io.IOException;
 import java.util.Objects;
-import java.util.concurrent.*;
+import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static bret.worldexporter.WorldExporter.LOGGER;
@@ -31,6 +35,8 @@ public class WorldExporterClient {
     private static boolean installedOnServer = false;  // set during PacketHandler setup
     public static final AtomicBoolean receivedPermissions = new AtomicBoolean(false);
     public static final CyclicBarrier receivedPermissionsBarrier = new CyclicBarrier(2);
+    public static final AtomicBoolean stateResponseValid = new AtomicBoolean(false);
+    public static final CyclicBarrier receivedStateResponseBarrier = new CyclicBarrier(2);
 
     public static boolean isClientExporting() {
         return clientExporting;
@@ -60,9 +66,7 @@ public class WorldExporterClient {
         return canPauseServer;
     }
 
-    private static void execute(String msg, ClientPlayerEntity player) {
-        clientExporting = true;
-
+    private static boolean sendInitialPackets() {
         // check permissions from server
         receivedPermissions.set(false);
         receivedPermissionsBarrier.reset();
@@ -80,6 +84,26 @@ public class WorldExporterClient {
             }
         }
 
+        stateResponseValid.set(false);
+        receivedStateResponseBarrier.reset();
+        if (canRequestChunks()) {
+            PacketHandler.INSTANCE.sendToServer(new CSetExportStatePacket(true,
+                    canPauseServer() && WorldExporterConfig.CLIENT.requestPause.get()));
+            try {
+                receivedStateResponseBarrier.await(1000L * 10L, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException | BrokenBarrierException | TimeoutException e) {
+                if (!stateResponseValid.get()) {
+                    LOGGER.warn("Did not receive state response from server in time, cancelling export");
+                    return false;
+                }
+            }
+            return stateResponseValid.get();
+        } else {
+            return true;
+        }
+    }
+
+    private static void execute(String msg, ClientPlayerEntity player) {
         String argsString = msg.substring(CMD_BASE.length()).trim();
         String[] params = argsString.isEmpty() ? new String[]{} : argsString.split("\\s+");
         int radius = 64;
@@ -98,6 +122,16 @@ public class WorldExporterClient {
         } catch (Exception exception) {
             player.sendMessage(new StringTextComponent("There was an error parsing the command arguments. " +
                             "Example usage: " + CMD_BASE + " 64 0 255 true false 4"),
+                    Util.NIL_UUID
+            );
+            return;
+        }
+
+        clientExporting = true;
+        boolean doExport = sendInitialPackets();
+        if (!doExport) {
+            player.sendMessage(new StringTextComponent("The server did not authenticate the client. " +
+                            "The server state may be broken or there may be another export currently in progress."),
                     Util.NIL_UUID
             );
             return;
@@ -124,6 +158,7 @@ public class WorldExporterClient {
         } finally {
             clientExporting = false;
             if (canRequestChunks()) {
+                PacketHandler.INSTANCE.sendToServer(new CSetExportStatePacket(false, false));
                 ((IMixinChunkArrayAccessor) (Object) Objects.requireNonNull(Minecraft.getInstance().level).getChunkSource().storage).worldexporter$clear();
             }
         }
