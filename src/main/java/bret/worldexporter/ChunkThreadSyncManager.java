@@ -8,6 +8,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.util.math.ChunkPos;
 
 import javax.annotation.Nullable;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -20,6 +21,7 @@ public class ChunkThreadSyncManager {
     private final static LinkedBlockingQueue<Runnable> threadSyncRequiredTasks = new LinkedBlockingQueue<>();
     private final static Semaphore threadSyncSemaphore = new Semaphore(0);
     private final static AtomicBoolean threadsShouldResume = new AtomicBoolean(false);
+    private final static AtomicBoolean requestsDisabled = new AtomicBoolean(false);
     // uses ChunkPos <-> long functions for mapping
     private final static ConcurrentHashMap.KeySetView<Long, Boolean> pendingChunks = ConcurrentHashMap.newKeySet();
     private final static Long2ObjectOpenHashMap<boolean[]> chunkPartsReceived = new Long2ObjectOpenHashMap<>();
@@ -28,19 +30,21 @@ public class ChunkThreadSyncManager {
 
     public static void reset(int threadCount) {
         // semaphore starts with 0 permits because threads are working when they start
-        threadSyncSemaphore.drainPermits();
         threadSyncRequiredTasks.clear();
+        threadSyncSemaphore.drainPermits();
+        threadsShouldResume.set(false);
+        requestsDisabled.set(false);
+        pendingChunks.clear();
+        chunkPartsReceived.clear();
         chunkEvents.clear();
         threads = threadCount;
     }
 
     public static void add(Runnable task) {
         threadSyncRequiredTasks.add(task);
-//        needsSync.set(true);
     }
 
     public static boolean threadsNeedSync() {
-//        return needsSync.get();
         return !threadSyncRequiredTasks.isEmpty();
     }
 
@@ -57,6 +61,7 @@ public class ChunkThreadSyncManager {
         return chunkEvents.computeIfAbsent(pos, k -> new AtomicBoolean(false));
     }
 
+    // must be run on the main thread since when all parts are received the light manager needs to run updates
     public static void notifyChunkReceived(int x, int z, ReceivedChunkEnum partType) {
         long pos = ChunkPos.asLong(x, z);
         boolean[] parts = chunkPartsReceived.computeIfAbsent(pos, k -> new boolean[ReceivedChunkEnum.values().length]);
@@ -70,8 +75,15 @@ public class ChunkThreadSyncManager {
         }
 
         if (allReceived) {
+            // WorldExporter.LOGGER.info(String.format("Chunk all received: x:%d, z:%d", x, z));
+            requestsDisabled.set(true);
+            // how accurate is the data if it cannot request true data from nearby chunks?
+            Objects.requireNonNull(Minecraft.getInstance().level).getChunkSource()
+                    .getLightEngine().runUpdates(Integer.MAX_VALUE, true, true);
+            requestsDisabled.set(false);
             AtomicBoolean chunkReceived = getChunkEvent(x, z);
             chunkReceived.set(true);
+            pendingChunks.remove(pos);
             //noinspection SynchronizationOnLocalVariableOrMethodParameter
             synchronized (chunkReceived) {
                 chunkReceived.notifyAll();
@@ -85,15 +97,10 @@ public class ChunkThreadSyncManager {
         release();
         AtomicBoolean chunkReceived = getChunkEvent(x, z);
         while (!chunkReceived.get()) {
-            //noinspection SynchronizationOnLocalVariableOrMethodParameter
-//            synchronized (chunkReceived) {
-//                try {
-//                    chunkReceived.wait();
-//                } catch (InterruptedException ignored) {}
-//            }
             try {
                 Thread.sleep(10);
-            } catch (InterruptedException ignored) {}
+            } catch (InterruptedException ignored) {
+            }
         }
         waitForThreadsReady();
         acquire();
@@ -116,7 +123,8 @@ public class ChunkThreadSyncManager {
         while (!threadsShouldResume.get()) {
             try {
                 Thread.sleep(10);
-            } catch (InterruptedException ignored) {}
+            } catch (InterruptedException ignored) {
+            }
         }
     }
 
@@ -168,7 +176,8 @@ public class ChunkThreadSyncManager {
 
                 try {
                     Thread.sleep(10);
-                } catch (InterruptedException ignored) {}
+                } catch (InterruptedException ignored) {
+                }
 
                 // other main thread tasks may block external threads and prevent them from releasing their semaphore
                 while (secondaryQueue != null && !secondaryQueue.isEmpty()) {
@@ -202,6 +211,9 @@ public class ChunkThreadSyncManager {
         } else {
             ChunkThreadSyncManager.blockUntilChunk(pChunkX, pChunkZ);
         }
-        pendingChunks.remove(pos);
+    }
+
+    public static boolean requestsDisabled() {
+        return requestsDisabled.get();
     }
 }

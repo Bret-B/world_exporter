@@ -44,7 +44,11 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
     private void onGetChunk(int pChunkX, int pChunkZ, ChunkStatus pRequiredStatus, boolean pLoad, CallbackInfoReturnable<Chunk> cir) {
         if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
-//        if (!ChunkThreadSyncManager.isPending(pChunkX, pChunkZ) &&
+        // prevent infinite chunk request chains by falling through
+        if (ChunkThreadSyncManager.requestsDisabled()) {
+            return;
+        }
+
         if ((!storage.inRange(pChunkX, pChunkZ) ||
                 (storage.inRange(pChunkX, pChunkZ) &&
                         storage.getIndex(pChunkX, pChunkZ) >= 0 &&
@@ -152,12 +156,8 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         // This also means that coordinate returns true for inRange() and other calls using that index are valid
         // note: chunkCount is not updated
         @Unique
-        // private final Map<Integer, Chunk> worldexporter$additionalStorage = new HashMap<>();
-        // private final Map<Integer, Chunk> worldexporter$additionalStorage = new Int2ObjectOpenHashMap<>();
         private final Map<Integer, Chunk> worldexporter$additionalStorage = new ConcurrentHashMap<>();
         @Unique
-        // private final Map<Long, Integer> worldexporter$pairToNegativeKey = new HashMap<>();
-        // private final Map<Long, Integer> worldexporter$pairToNegativeKey = new Long2IntOpenHashMap();
         // this is required because the standard ChunkArray calls work with integer keys
         private final Map<Long, Integer> worldexporter$pairToNegativeKey = new ConcurrentHashMap<>();
         @Unique

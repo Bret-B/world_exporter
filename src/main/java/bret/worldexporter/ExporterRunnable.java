@@ -204,7 +204,7 @@ class ExporterRunnable implements Runnable {
         reset();
         ArrayList<Quad> quads = new ArrayList<>();
         Chunk chunk = exporter.world.getChunkAt(start);
-        if (chunk.isEmpty() && !WorldExporterClient.canRequestChunks()) {
+        if (chunk.isEmpty()) {
             return quads;
         }
 

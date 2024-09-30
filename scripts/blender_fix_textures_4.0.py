@@ -23,7 +23,7 @@ visible_emissive_strength = 5
 # actual_emissive_strength = 5  # TODO: actual_emissive_strength implementation
 normal_strength = 1.0
 merge_water_materials = True
-set_nonzero_specular = 0.5  # default specular value to be used for materials with a specular value of 0.0
+set_nonzero_specular = 0.2  # default specular value to be used for materials with a specular value of 0.0
 # Do not edit anything below this line unless you know what you're doing
 
 
@@ -82,7 +82,7 @@ for selected_object in bpy.context.selected_objects:
                         mat.node_tree.links.new(transparent.outputs[0], mix_shader.inputs[2])
                         mat.node_tree.links.new(node.outputs[0], mix_shader.inputs[1])
                         mat.node_tree.links.new(mix_shader.outputs[0], mat.node_tree.nodes['Material Output'].inputs[0])
-                
+
                 # Blender's OBJ importer incorrectly uses sRGB color space for metallic, roughness, and normal maps when they should 
                 # instead be set to Non-Color
                 if cycles:

@@ -49,10 +49,11 @@ public class CRequestChunkPacket {
             // WorldExporter.LOGGER.info(String.format("Request received for chunk x:%d, z:%d received on server", packet.chunkX, packet.chunkZ));
             WorldExporterServer.add(() -> {
                 // WorldExporter.LOGGER.info(String.format("Processing chunk request x:%d, z:%d on server thread and returning data packets", packet.chunkX, packet.chunkZ));
+                // Will generate or load the chunk from disk as necessary
                 Chunk toSend = sender.level.getChunk(packet.chunkX, packet.chunkZ);
 
-                PacketHandler.sendToPlayer(sender, new SChunkDataPacketCustom(toSend, 65535));
                 PacketHandler.sendToPlayer(sender, new SUpdateLightPacketCustom(new ChunkPos(packet.chunkX, packet.chunkZ), sender.level.getChunkSource().getLightEngine(), true));
+                PacketHandler.sendToPlayer(sender, new SChunkDataPacketCustom(toSend, 65535));
             });
         }
     }

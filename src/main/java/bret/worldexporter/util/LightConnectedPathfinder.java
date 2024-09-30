@@ -1,6 +1,7 @@
 package bret.worldexporter.util;
 
 import bret.worldexporter.Exporter;
+import bret.worldexporter.WorldExporterClient;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
@@ -9,6 +10,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.shapes.IBooleanFunction;
 import net.minecraft.util.math.shapes.VoxelShape;
 import net.minecraft.util.math.shapes.VoxelShapes;
@@ -125,7 +127,17 @@ public class LightConnectedPathfinder {
         // Only blocks that have a connection to skylight need to be added.
         // Therefore, start checking at only blocks that have skylight since they will always
         // have some path to all blocks we are interested in adding to allLightConnected
+        long lastTouchedChunk = new ChunkPos(Integer.MAX_VALUE, Integer.MAX_VALUE).toLong();
         for (BlockPos blockPos : BlockPos.betweenClosed(segmentLow, segmentHigh)) {
+            if (WorldExporterClient.canRequestChunks()) {
+                long thisChunk = ChunkPos.asLong(blockPos.getX() >> 4, blockPos.getZ() >> 4);
+                // "touch" the chunk to request and update its light data
+                if (lastTouchedChunk != thisChunk) {
+                    lastTouchedChunk = thisChunk;
+                    world.getChunkAt(blockPos);
+                }
+            }
+
             if (hasSkyLight(blockPos)) {
                 long pos = blockPos.asLong();
                 unexplored.enqueue(pos);
