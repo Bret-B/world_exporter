@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import static bret.worldexporter.WorldExporter.LOGGER;
@@ -59,11 +60,16 @@ public class ObjExporter extends Exporter {
         boolean success = true;
 
         try (FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlBWriter = new BufferedWriter(mtlWriter, 8 << 20)) {  // 8 MB buffer
+            AtomicLong chunkCount = new AtomicLong(0);
             Consumer<ArrayList<ExportChunk>> chunkConsumer = (exportChunks) -> {
                 for (ExportChunk exportChunk : exportChunks) {
                     try {
                         BufferedWriter objWriter = getObjWriter(objBaseFilename, fullMtlFilename, exportChunk);
                         writeChunk(exportChunk, objWriter, mtlBWriter);
+                        String chunkNum = String.format("%,d", chunkCount.incrementAndGet());
+                        int paddingCount = Math.max(15 - chunkNum.length(), 0);
+                        String paddedNum = chunkNum + (new String(new char[paddingCount]).replace("\0", " "));
+                        LOGGER.info(String.format("Exported chunk %s At x: %d\tz: %d", paddedNum, exportChunk.xChunkPos, exportChunk.zChunkPos));
                     } catch (Exception e) {
                         LOGGER.error("Unable to write chunk to the obj/mtl file: ", e);
                         throw new RuntimeException(e);
