@@ -2,7 +2,7 @@ package bret.worldexporter.util.disk;
 
 import bret.worldexporter.util.NotifyingLRUCache;
 import it.unimi.dsi.fastutil.io.BinIO;
-import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 
 import java.io.File;
 import java.io.IOException;
@@ -13,9 +13,9 @@ import java.nio.file.Paths;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-public class DiskBackedBuckets<BucketKey, BucketValue extends Serializable> {
-    private final NotifyingLRUCache<BucketKey, BucketValue> memoryBuckets;
-    private final Object2ObjectOpenHashMap<BucketKey, String> diskBuckets = new Object2ObjectOpenHashMap<>();
+public class DiskBackedBuckets<BucketValue extends Serializable> {
+    private final NotifyingLRUCache<Long, BucketValue> memoryBuckets;
+    private final Long2ObjectOpenHashMap<String> diskBuckets = new Long2ObjectOpenHashMap<>();
     private final Supplier<BucketValue> bucketValueSupplier;
     private final Path directory;
 
@@ -40,12 +40,12 @@ public class DiskBackedBuckets<BucketKey, BucketValue extends Serializable> {
         diskBuckets.clear();
     }
 
-    public BucketValue getBucket(BucketKey bucketKey) {
+    public BucketValue getBucket(long bucketKey) {
         return getBucket(bucketKey, false);
     }
 
     // returns the bucket associated with the provided bucket key, loading as necessary and creating if desired
-    public BucketValue getBucket(BucketKey bucketKey, boolean createBucket) {
+    public BucketValue getBucket(long bucketKey, boolean createBucket) {
         BucketValue result;
         result = memoryBuckets.get(bucketKey);
         if (result != null) {
@@ -72,7 +72,7 @@ public class DiskBackedBuckets<BucketKey, BucketValue extends Serializable> {
     }
 
     // called when the bucket is being removed from memory: save to disk
-    private void onMemoryRemove(BucketKey bucketKey, BucketValue bucket) {
+    private void onMemoryRemove(long bucketKey, BucketValue bucket) {
         String pathToBucket = bucketPath(bucketKey).toString();
         try {
             BinIO.storeObject(bucket, new File(pathToBucket));
@@ -82,7 +82,7 @@ public class DiskBackedBuckets<BucketKey, BucketValue extends Serializable> {
         diskBuckets.put(bucketKey, pathToBucket);
     }
 
-    private Path bucketPath(BucketKey bucketKey) {
+    private Path bucketPath(long bucketKey) {
         return Paths.get(directory.toString(), String.valueOf(bucketKey));
     }
 }
