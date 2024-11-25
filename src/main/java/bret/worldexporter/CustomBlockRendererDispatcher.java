@@ -28,7 +28,7 @@ public class CustomBlockRendererDispatcher {
         this.fluidRenderer = new CustomBlockFluidRenderer(p_i46577_2_);
     }
 
-    public boolean renderBlock(IBlockState state, BlockPos pos, IBlockAccess blockAccess, BufferBuilder bufferBuilderIn) {
+    public boolean renderBlock(IBlockState state, BlockPos pos, IBlockAccess blockAccess, BufferBuilder bufferBuilderIn, boolean randomize) {
         try {
             EnumBlockRenderType enumblockrendertype = state.getRenderType();
 
@@ -46,7 +46,7 @@ public class CustomBlockRendererDispatcher {
                     case MODEL:
                         IBakedModel model = this.getModelForState(state);
                         state = state.getBlock().getExtendedState(state, blockAccess, pos);
-                        return this.blockModelRenderer.renderModel(blockAccess, model, state, pos, bufferBuilderIn, true);
+                        return this.blockModelRenderer.renderModel(blockAccess, model, state, pos, bufferBuilderIn, true, randomize);
                     case LIQUID:
                         return this.fluidRenderer.renderFluid(blockAccess, state, pos, bufferBuilderIn);
                     case ENTITYBLOCK_ANIMATED:
