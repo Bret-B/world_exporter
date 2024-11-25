@@ -1,7 +1,7 @@
 package bret.worldexporter;
 
-import org.lwjgl.util.vector.Vector2f;
-import org.lwjgl.util.vector.Vector3f;
+import bret.worldexporter.lwjgl.Vector2f;
+import bret.worldexporter.lwjgl.Vector3f;
 
 import java.util.*;
 
@@ -294,7 +294,7 @@ public class MeshOptimizer {
         private final Vertex[] vertices;
 
         public SubsetKey(Quad quad) {
-            texture = quad.getResource().toString();
+            texture = quad.mostSpecificResource().toString();
             vertices = quad.getVertices();
             normal = quad.getNormal();
             color = quad.getColor();

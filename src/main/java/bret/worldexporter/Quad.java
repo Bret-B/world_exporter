@@ -1,12 +1,12 @@
 package bret.worldexporter;
 
+import bret.worldexporter.lwjgl.Matrix3f;
+import bret.worldexporter.lwjgl.Vector2f;
+import bret.worldexporter.lwjgl.Vector3f;
 import net.minecraft.client.renderer.texture.ITextureObject;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.util.BlockRenderLayer;
 import net.minecraft.util.ResourceLocation;
-import org.lwjgl.util.vector.Matrix3f;
-import org.lwjgl.util.vector.Vector2f;
-import org.lwjgl.util.vector.Vector3f;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -17,6 +17,7 @@ public class Quad {
     private static final Vector3f DESIRED_NORM = new Vector3f(0, 0, 1);
     private final Vertex[] vertices = new Vertex[4];
     private ResourceLocation resource;
+    private ResourceLocation atlas;
     private int count = 0;
     private final BlockRenderLayer type;
     private UVBounds uvBounds;
@@ -25,9 +26,9 @@ public class Quad {
     private int lightValue = 0;
     private boolean hasFullUV = true;
 
-    public Quad(BlockRenderLayer renderType, ResourceLocation resource) {
+    public Quad(BlockRenderLayer renderType, ResourceLocation atlas) {
         this.type = renderType;
-        this.resource = resource;
+        this.atlas = atlas;
     }
 
     public Quad(Quad other) {
@@ -38,6 +39,7 @@ public class Quad {
         this.type = other.type;
         this.uvBounds = other.uvBounds == null ? null : new UVBounds(other.uvBounds);
         this.resource = other.resource;
+        this.atlas = other.atlas;
         this.texture = other.texture;
         this.sprite = other.sprite;
         this.lightValue = other.lightValue;
@@ -161,6 +163,21 @@ public class Quad {
 
     public void setResource(ResourceLocation resource) {
         this.resource = resource;
+    }
+
+    public ResourceLocation getAtlas() {
+        return atlas;
+    }
+
+    public void setAtlas(ResourceLocation resource) {
+        this.atlas = resource;
+    }
+
+    public ResourceLocation mostSpecificResource() {
+        if (resource != null) {
+            return resource;
+        }
+        return atlas;
     }
 
     public ITextureObject getTexture() {

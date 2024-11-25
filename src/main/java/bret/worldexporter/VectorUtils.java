@@ -1,7 +1,7 @@
 package bret.worldexporter;
 
-import org.lwjgl.util.vector.Matrix3f;
-import org.lwjgl.util.vector.Vector3f;
+import bret.worldexporter.lwjgl.Matrix3f;
+import bret.worldexporter.lwjgl.Vector3f;
 
 public class VectorUtils {
     public static final Matrix3f IDENTITY = new Matrix3f();  // initialized to identity matrix

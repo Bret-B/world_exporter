@@ -1,5 +1,7 @@
 package bret.worldexporter;
 
+import bret.worldexporter.lwjgl.Vector2f;
+import bret.worldexporter.lwjgl.Vector3f;
 import net.minecraft.block.Block;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
@@ -22,12 +24,11 @@ import org.apache.logging.log4j.Logger;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
-import org.lwjgl.util.vector.Vector2f;
-import org.lwjgl.util.vector.Vector3f;
 
 import javax.annotation.Nullable;
 import java.awt.image.BufferedImage;
 import java.awt.image.RasterFormatException;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.*;
@@ -121,6 +122,7 @@ public class Exporter {
         TextureManager textureManager = Minecraft.getMinecraft().getTextureManager();
         ITextureObject texture;
         texture = textureManager.getTexture(resource);
+        //noinspection ConstantValue
         if (texture == null) {
             logger.info("Loading the following resource: " + resource);
             textureManager.bindTexture(resource);
@@ -139,8 +141,8 @@ public class Exporter {
         return (glTextureId == 0 || glTextureId == -1);
     }
 
-    public synchronized BufferedImage getAtlasImage(ResourceLocation resource) {
-        int glTextureId = getGlTextureId(resource);
+    public synchronized BufferedImage getAtlasImage(ResourceLocation atlas) {
+        int glTextureId = getGlTextureId(atlas);
         return getAtlasImage(glTextureId);
     }
 
@@ -154,10 +156,10 @@ public class Exporter {
         BufferedImage image;
         TextureAtlasSprite sprite = quad.getSprite();
         if (sprite == null) {
-            image = getAtlasImage(quad.getResource());
+            image = getAtlasImage(quad.getAtlas());
             image = ImgUtils.tintImage(image, quad.getColor());
         } else {
-            image = getAtlasSubImage(sprite, quad.getColor(), quad.getResource());
+            image = getAtlasSubImage(sprite, quad.getColor(), quad.getAtlas());
         }
         return image;
     }
@@ -173,8 +175,8 @@ public class Exporter {
         return getImageFromUV(glTextureId, originalUV, color);
     }
 
-    protected Pair<ResourceLocation, TextureAtlasSprite> getTextureFromAtlas(ResourceLocation resource, UVBounds uvBounds) {
-        ITextureObject texture = getTexture(resource);
+    protected Pair<ResourceLocation, TextureAtlasSprite> getTextureFromAtlas(ResourceLocation atlas, UVBounds uvBounds) {
+        ITextureObject texture = getTexture(atlas);
 
         if (!(texture instanceof TextureMap)) return null;
         TextureMap atlasTexture = (TextureMap) texture;
@@ -183,7 +185,7 @@ public class Exporter {
         // which TextureAtlasSprite contains the given UVBounds
         // If this is ever too slow a structure like a quadtree or spatial hashing could be used, but profiling shows this to be a non-issue
         synchronized (atlasUVToSpriteCache) {
-            return atlasUVToSpriteCache.computeIfAbsent(Pair.of(resource, new UVBounds(uvBounds)), k -> {
+            return atlasUVToSpriteCache.computeIfAbsent(Pair.of(atlas, new UVBounds(uvBounds)), k -> {
                 for (String name : atlasTexture.mapUploadedSprites.keySet()) {
                     TextureAtlasSprite sprite = atlasTexture.getAtlasSprite(name);
                     float uMin = sprite.getMinU();
@@ -199,28 +201,28 @@ public class Exporter {
         }
     }
 
-    // For every quad: if its texture refers to an atlasImage, update its texture resourceLocation, add a reference to its sprite,
+    // For every quad: if its atlas resource refers to an atlasImage, update its texture resource, add a reference to its sprite,
     // and update its UV coordinates respectively (in place)
     private void updateQuadTextures() {
         List<Quad> quads = blockQuadsMap.values().stream().flatMap(Collection::stream).collect(Collectors.toList());
         for (Quad quad : quads) {
             if (!quad.hasUV()) continue;
 
-            ITextureObject baseTexture = getTexture(quad.getResource());
+            ITextureObject baseTexture = getTexture(quad.getAtlas());
             quad.setTexture(baseTexture);
             boolean didModifyUV = false;
             // allowed error is very small by default
-            float allowableErrorU = 0.0001f;
-            float allowableErrorV = 0.0001f;
+            float allowableErrorU = 0.0001F;
+            float allowableErrorV = 0.0001F;
             if (baseTexture instanceof TextureMap) {
-                Pair<ResourceLocation, TextureAtlasSprite> nameAndTexture = getTextureFromAtlas(quad.getResource(), quad.getUvBounds());
+                Pair<ResourceLocation, TextureAtlasSprite> nameAndTexture = getTextureFromAtlas(quad.getAtlas(), quad.getUvBounds());
                 if (nameAndTexture != null) {
                     quad.setResource(nameAndTexture.getLeft());
                     TextureAtlasSprite sprite = nameAndTexture.getRight();
                     // recalculate the allowable error based on the sprite's size so that any rounding does not change
-                    // the sprite's display on a sprite-pixel level
-                    allowableErrorU = 1.0F / sprite.getIconWidth() / 2.0F;
-                    allowableErrorV = 1.0F / sprite.getIconHeight() / 2.0F;
+                    // the sprite's display on a sprite-pixel level (capped to a certain level)
+                    allowableErrorU = Math.max(1.0F / sprite.getIconWidth() / 2.0F, 0.00125F);
+                    allowableErrorV = Math.max(1.0F / sprite.getIconHeight() / 2.0F, 0.00125F);
                     for (Vertex vertex : quad.getVertices()) {
                         Vector2f uv = vertex.getUv();
                         uv.x = (uv.x - sprite.getMinU()) / (sprite.getMaxU() - sprite.getMinU());
@@ -231,7 +233,7 @@ public class Exporter {
                 } else {
                     logger.warn("Unable to determine where on atlas " + ((TextureMap) baseTexture).getBasePath() +
                             " the texture is with the following UVs: " + quad.getUvBounds() +
-                            ", derived from from ResourceLocation " + quad.getResource() +
+                            ", derived from from ResourceLocation " + quad.getAtlas() +
                             ", at world position " + quad.getVertices()[0].getPosition());
                 }
             } else if (baseTexture instanceof DynamicTexture) {
@@ -266,6 +268,7 @@ public class Exporter {
             VertexFormat vertexFormat = bufferBuilder.getVertexFormat();
             int vertexByteSize = vertexFormat.getIntegerSize() * 4;
             ByteBuffer bytebuffer = bufferBuilder.getByteBuffer();
+            Buffer buf = (Buffer) bytebuffer;
             List<VertexFormatElement> list = vertexFormat.getElements();
 
             for (BlockPos pos : layerPosVerticesMap.get(BlockRenderLayer.values()[blockRenderLayerId]).keySet()) {
@@ -283,12 +286,12 @@ public class Exporter {
 
                 Quad quad = new Quad(BlockRenderLayer.values()[blockRenderLayerId], resource);
                 boolean skipQuad = false;
-                bytebuffer.position(firstVertexBytePos);
+                buf.position(firstVertexBytePos);
                 for (int vertexNum = 0; vertexNum < vertexCount; ++vertexNum) {
                     if (skipQuad) {
                         vertexNum += 3 - (vertexNum - 1) % 4;
                         if (vertexNum >= vertexCount) break;
-                        bytebuffer.position(bytebuffer.position() + (4 - ((vertexNum - 1) % 4)));
+                        buf.position(buf.position() + (4 - ((vertexNum - 1) % 4)));
                         quad = new Quad(BlockRenderLayer.values()[blockRenderLayerId], resource);
                         skipQuad = false;
                     } else if (quad.getCount() == 4) {
@@ -304,7 +307,7 @@ public class Exporter {
                                 if (vertexFormatElement.getType() == VertexFormatElement.EnumType.FLOAT) {
                                     vertex.setPosition(new Vector3f(bytebuffer.getFloat(), bytebuffer.getFloat(), bytebuffer.getFloat()));
                                 } else {
-                                    bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
+                                    buf.position(buf.position() + vertexFormatElement.getSize());
                                     logger.warn("Vertex position element had no supported type, skipping.");
                                     continue;
                                 }
@@ -313,7 +316,7 @@ public class Exporter {
                                 if (vertexFormatElement.getType() == VertexFormatElement.EnumType.UBYTE) {
                                     vertex.setColor(bytebuffer.getInt());
                                 } else {
-                                    bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
+                                    buf.position(buf.position() + vertexFormatElement.getSize());
                                     logger.warn("Vertex color element had no supported type, skipping.");
                                     continue;
                                 }
@@ -344,9 +347,9 @@ public class Exporter {
                                         //  Minecraft.getMinecraft().getTextureManager().getTexture(new ResourceLocation( "minecraft", "dynamic/lightmap_1"))
                                         //  Discard first short (sky light) and only use second (block light) when implementing emissive lighting?
                                         // vertex.setUvlight(new Vector2f(bytebuffer.getShort() / 65520.0f, bytebuffer.getShort() / 65520.0f));
-                                        break;
+//                                        break;
                                     default:
-                                        bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
+                                        buf.position(buf.position() + vertexFormatElement.getSize());
 //                                        logger.warn("Vertex UV element had no supported type, skipping.");
                                         // not currently used, appears in formats like ENTITY?
                                         continue;
@@ -355,7 +358,7 @@ public class Exporter {
                             case PADDING:
                             case NORMAL:
                             default:
-                                bytebuffer.position(bytebuffer.position() + vertexFormatElement.getSize());
+                                buf.position(buf.position() + vertexFormatElement.getSize());
                         }
                     }
 
@@ -462,6 +465,7 @@ public class Exporter {
 
         ArrayList<Quad> chunkQuads = new ArrayList<>();
         blockQuadsMap.values().forEach(chunkQuads::addAll);
+        flipV(chunkQuads);
         if (optimizeMesh) {
             MeshOptimizer meshOptimizer = new MeshOptimizer();
             chunkQuads = meshOptimizer.optimize(chunkQuads);
@@ -479,6 +483,17 @@ public class Exporter {
         return chunk;
     }
 
+    // Flips quad V values
+    protected static void flipV(List<Quad> quads) {
+        for (Quad quad : quads) {
+            if (!quad.hasUV()) continue;
+
+            for (Vertex vertex : quad.getVertices()) {
+                vertex.getUv().y = 1 - vertex.getUv().y;
+            }
+            quad.updateUvBounds();
+        }
+    }
 
     private static void removeDuplicateQuads(Collection<ArrayList<Quad>> quadsArrays) {
         for (ArrayList<Quad> quads : quadsArrays) {
@@ -525,13 +540,13 @@ public class Exporter {
                 float avg2;
                 synchronized (this) {
                     if (quad1.hasUV()) {
-                        avg1 = uvTransparencyCache.computeIfAbsent(Pair.of(quad1.getResource(), quad1.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad1)));
+                        avg1 = uvTransparencyCache.computeIfAbsent(Pair.of(quad1.getAtlas(), quad1.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad1)));
                     } else {
                         avg1 = (float) ((quad1.getColor() & 0xFF000000) >>> 24);
                     }
 
                     if (quad2.hasUV()) {
-                        avg2 = uvTransparencyCache.computeIfAbsent(Pair.of(quad2.getResource(), quad2.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad2)));
+                        avg2 = uvTransparencyCache.computeIfAbsent(Pair.of(quad2.getAtlas(), quad2.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad2)));
                     } else {
                         avg2 = (float) ((quad2.getColor() & 0xFF000000) >>> 24);
                     }

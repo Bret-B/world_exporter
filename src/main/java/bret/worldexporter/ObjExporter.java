@@ -1,12 +1,12 @@
 package bret.worldexporter;
 
+import bret.worldexporter.lwjgl.Vector2f;
+import bret.worldexporter.lwjgl.Vector3f;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.ResourceLocation;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
-import org.lwjgl.util.vector.Vector2f;
-import org.lwjgl.util.vector.Vector3f;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -185,22 +185,22 @@ public class ObjExporter extends Exporter {
                 continue;
             }
 
-            Triple<ResourceLocation, Integer, Integer> model = Triple.of(quad.getResource(), quad.getColor(), quad.getLightValue());
+            Triple<ResourceLocation, Integer, Integer> model = Triple.of(quad.mostSpecificResource(), quad.getColor(), quad.getLightValue());
             int modelId;
             if (!modelToIdMap.containsKey(model)) {
                 BufferedImage image = getImage(quad);
                 if (image == null) {
-                    logger.warn("Skipped face with texture: " + quad.getResource() + " because Image was null");
+                    logger.warn("Skipped face with texture: " + quad.mostSpecificResource() + " because Image was null");
                     modelToIdMap.put(model, -1);
                     continue;
                 }
                 if (!EXPORT_INVISIBLE && ImgUtils.isCompletelyTransparent(image)) {
-                    logger.info("Skipped face with texture: " + quad.getResource() + " because Image was completely transparent");
+                    logger.info("Skipped face with texture: " + quad.mostSpecificResource() + " because Image was completely transparent");
                     modelToIdMap.put(model, -1);
                     continue;
                 }
 
-                ResourceLocation quadResource = quad.getResource();
+                ResourceLocation quadResource = quad.mostSpecificResource();
                 modelId = modelCount++;
                 modelToIdMap.put(model, modelId);
                 String modelName = quadResource.toString().replaceAll("[^a-zA-Z0-9.-]", "-") + '_' + modelId;

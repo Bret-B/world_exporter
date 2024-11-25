@@ -1,7 +1,7 @@
 package bret.worldexporter;
 
-import org.lwjgl.util.vector.Vector2f;
-import org.lwjgl.util.vector.Vector3f;
+import bret.worldexporter.lwjgl.Vector2f;
+import bret.worldexporter.lwjgl.Vector3f;
 
 import java.util.Objects;
 
