@@ -470,7 +470,7 @@ public class Exporter {
             MeshOptimizer meshOptimizer = new MeshOptimizer();
             chunkQuads = meshOptimizer.optimize(chunkQuads);
         }
-        ExportChunk chunk = new ExportChunk(chunkQuads, chunkXOffset, chunkZOffset);
+        ExportChunk chunk = new ExportChunk(chunkQuads, currentX >> 4, currentZ >> 4);
 
         // Update the current position to be the starting position of the next chunk export (which may be
         // outside the selected boundary, accounted for at the beginning of the function call).
