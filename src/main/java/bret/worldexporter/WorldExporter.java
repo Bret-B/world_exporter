@@ -24,16 +24,16 @@ import java.io.IOException;
 public class WorldExporter {
     public static final String MODID = "worldexporter";
 
-    private static Logger logger;
+    public static Logger LOGGER;
 
     @EventHandler
     public void preInit(FMLPreInitializationEvent event) {
-        logger = event.getModLog();
+        LOGGER = event.getModLog();
     }
 
     @EventHandler
     public void init(FMLInitializationEvent event) {
-        logger.info("Loading World Exporter");
+        LOGGER.info("Loading World Exporter");
     }
 
     @EventHandler
@@ -77,7 +77,7 @@ public class WorldExporter {
                         "Allocate more memory to Minecraft and try again."));
                 return;
             } catch (IOException e) {
-                logger.error("Export failed: " + e);
+                LOGGER.error("Export failed: " + e);
                 success = false;
             }
 

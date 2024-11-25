@@ -462,6 +462,10 @@ public class Exporter {
 
         ArrayList<Quad> chunkQuads = new ArrayList<>();
         blockQuadsMap.values().forEach(chunkQuads::addAll);
+        if (optimizeMesh) {
+            MeshOptimizer meshOptimizer = new MeshOptimizer();
+            chunkQuads = meshOptimizer.optimize(chunkQuads);
+        }
         ExportChunk chunk = new ExportChunk(chunkQuads, chunkXOffset, chunkZOffset);
 
         // Update the current position to be the starting position of the next chunk export (which may be
