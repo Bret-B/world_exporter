@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "bret.worldexporter.mixins",
+  "compatibilityLevel": "JAVA_8",
+  "refmap": "worldexporter.mixin.refmap.json",
+  "mixins": [],
+  "client": [],
+  "server": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
