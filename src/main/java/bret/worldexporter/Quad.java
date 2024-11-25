@@ -1,6 +1,9 @@
 package bret.worldexporter;
 
+import net.minecraft.client.renderer.texture.ITextureObject;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.util.BlockRenderLayer;
+import net.minecraft.util.ResourceLocation;
 import org.lwjgl.util.vector.Matrix3f;
 import org.lwjgl.util.vector.Vector2f;
 import org.lwjgl.util.vector.Vector3f;
@@ -8,17 +11,23 @@ import org.lwjgl.util.vector.Vector3f;
 import java.util.Arrays;
 import java.util.Objects;
 
-public class Quad {
 
+public class Quad {
+    private static final float NORMAL_OVERLAP_SQ = 0.0001f;  // 0.01 regular distance
+    private static final Vector3f DESIRED_NORM = new Vector3f(0, 0, 1);
     private final Vertex[] vertices = new Vertex[4];
+    private ResourceLocation resource;
     private int count = 0;
     private final BlockRenderLayer type;
     private UVBounds uvBounds;
-    private static final float TOLERANCE = 0.0001f;
-    private static final Vector3f DESIRED_NORM = new Vector3f(0, 0, 1);
+    private ITextureObject texture;
+    private TextureAtlasSprite sprite;
+    private int lightValue = 0;
+    private boolean hasFullUV = true;
 
-    public Quad(BlockRenderLayer renderType) {
-        type = renderType;
+    public Quad(BlockRenderLayer renderType, ResourceLocation resource) {
+        this.type = renderType;
+        this.resource = resource;
     }
 
     public Quad(Quad other) {
@@ -27,17 +36,38 @@ public class Quad {
         }
         this.count = other.count;
         this.type = other.type;
-        this.uvBounds = new UVBounds(other.uvBounds);
+        this.uvBounds = other.uvBounds == null ? null : new UVBounds(other.uvBounds);
+        this.resource = other.resource;
+        this.texture = other.texture;
+        this.sprite = other.sprite;
+        this.lightValue = other.lightValue;
+        this.hasFullUV = other.hasFullUV;
     }
 
-    public boolean overlaps(Quad second) {
-        // rotate a copy of both quads in the plane such that their x and y coordinates can be compared
+    public static float distanceSq(Vector3f first, Vector3f second) {
+        return (float) (Math.pow(first.x - second.x, 2) + Math.pow(first.y - second.y, 2) + Math.pow(first.z - second.z, 2));
+    }
+
+    // returns positive infinity if the quads do not overlap
+    // otherwise, they are considered to overlap within TOLERANCE, and this returns their distance from each other
+    // which is positive or negative relative to this quad
+    public float overlaps(Quad second) {
+        Vector3f thisNorm = this.getNormal();
+        Vector3f secondNorm = second.getNormal();
+        // if the normals are not relatively similar, they should not be considered overlapping (no z-fighting)
+        // since they are normalized, comparing their distance is a good-enough estimate, though the distance also
+        // needs to be checked against the max distance that can occur (2) if the normals face directly opposite each other
+        // (given that the faces are not backface-culled)
+        float normalDistanceSq = distanceSq(thisNorm, secondNorm);
+        if (normalDistanceSq > NORMAL_OVERLAP_SQ && normalDistanceSq < 2 - NORMAL_OVERLAP_SQ) {
+            return Float.POSITIVE_INFINITY;
+        }
+
+        double overlapDistance = 0.0005;
+        // rotate a copy of both quads in space such that their x and y coordinates can be compared
         // (such that they lie flat along a xy plane (the z coordinate will vary))
         Quad thisCopy = new Quad(this);
         Quad secondCopy = new Quad(second);
-
-        Vector3f thisNorm = thisCopy.getNormal();
-        Vector3f secondNorm = secondCopy.getNormal();
 
         Matrix3f rotateByThis = VectorUtils.getRotationMatrix(thisNorm, DESIRED_NORM);
         Matrix3f rotateBySecond = VectorUtils.getRotationMatrix(secondNorm, DESIRED_NORM);
@@ -52,13 +82,19 @@ public class Quad {
         Vector3f[] minMaxPos = thisCopy.minMaxPositions();
         Vector3f[] minMaxPosSecond = secondCopy.minMaxPositions();
 
-        // if the planes are not close enough that they should be considered overlapping, return false
-        if (Math.abs(minMaxPos[1].z - minMaxPosSecond[1].z) > TOLERANCE) {
-            return false;
+        float distance = minMaxPos[1].z - minMaxPosSecond[1].z;
+        // the planes are not close enough that they should be considered overlapping
+        if (Math.abs(distance) > overlapDistance) {
+            return Float.POSITIVE_INFINITY;
         }
 
-        return (minMaxPos[1].x - minMaxPosSecond[0].x > TOLERANCE) && (minMaxPos[0].x - minMaxPosSecond[1].x < -TOLERANCE)
-                && (minMaxPos[1].y - minMaxPosSecond[0].y > TOLERANCE) && (minMaxPos[0].y - minMaxPosSecond[1].y) < -TOLERANCE;
+        if ((minMaxPos[1].x - minMaxPosSecond[0].x > overlapDistance) && (minMaxPos[0].x - minMaxPosSecond[1].x < -overlapDistance)
+                && (minMaxPos[1].y - minMaxPosSecond[0].y > overlapDistance) && (minMaxPos[0].y - minMaxPosSecond[1].y) < -overlapDistance) {
+            // the quads are inside each other (this is probably not accurate if they are rotated differently)
+            return distance;
+        } else {
+            return Float.POSITIVE_INFINITY;
+        }
     }
 
     public Vector3f[] minMaxPositions() {
@@ -83,11 +119,19 @@ public class Quad {
             throw new IllegalStateException("Quad already has 4 vertices");
         }
 
+        if (!vertex.hasUv()) {
+            hasFullUV = false;
+        }
+
         vertices[count++] = vertex;
 
         if (count == 4) {
-            setUvBounds();
+            addUvBounds();
         }
+    }
+
+    public boolean hasUV() {
+        return getCount() == 4 && hasFullUV;
     }
 
     public Vertex[] getVertices() {
@@ -111,8 +155,41 @@ public class Quad {
         return vertices[0].getColor();
     }
 
+    public ResourceLocation getResource() {
+        return resource;
+    }
+
+    public void setResource(ResourceLocation resource) {
+        this.resource = resource;
+    }
+
+    public ITextureObject getTexture() {
+        return texture;
+    }
+
+    public void setTexture(ITextureObject texture) {
+        this.texture = texture;
+    }
+
+    public TextureAtlasSprite getSprite() {
+        return sprite;
+    }
+
+    public void setSprite(TextureAtlasSprite sprite) {
+        this.sprite = sprite;
+    }
+
     public BlockRenderLayer getType() {
         return type;
+    }
+
+    // normal range is [0, 15] from lowest-highest brightness
+    public int getLightValue() {
+        return lightValue;
+    }
+
+    public void setLightValue(int lightValue) {
+        this.lightValue = lightValue;
     }
 
     public Vector3f getNormal() {
@@ -139,23 +216,24 @@ public class Quad {
         Quad quad = (Quad) o;
         if (count != quad.count) return false;
         if (type != quad.type) return false;
+        if (resource != quad.resource) return false;
+        if (texture != quad.texture) return false;
+        if (lightValue != quad.lightValue) return false;
+        if (sprite != quad.sprite) return false;
+        if (!Objects.equals(uvBounds, quad.uvBounds)) return false;
+        boolean[] vertexWasUsedForPosEquivalence = new boolean[quad.count];
         for (int i = 0; i < count; ++i) {
             boolean hasEquivalence = false;
-            boolean hasUvEquivalence = false;
             Vertex v1 = vertices[i];
             for (int j = 0; j < quad.count; ++j) {
-                if (v1.getPosition().equals(quad.vertices[j].getPosition())
-                        && v1.getColor() == quad.vertices[j].getColor()
-                        && v1.getUvlight().equals(quad.vertices[j].getUvlight())) {
+                if (!vertexWasUsedForPosEquivalence[j]
+                        && Objects.equals(v1.getPosition(), quad.vertices[j].getPosition())
+                        && v1.getColor() == quad.vertices[j].getColor()) {
                     hasEquivalence = true;
-                }
-
-                if (v1.getUv().equals(quad.vertices[j].getUv())) {
-                    hasUvEquivalence = true;
+                    vertexWasUsedForPosEquivalence[j] = true;
                 }
             }
             if (!hasEquivalence) return false;
-            if (!hasUvEquivalence) return false;
         }
         return true;
     }
@@ -165,24 +243,21 @@ public class Quad {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         Quad quad = (Quad) o;
-        return count == quad.count && type == quad.type && Arrays.equals(vertices, quad.vertices);
+        return count == quad.count && type.equals(quad.type) && Arrays.equals(vertices, quad.vertices)
+                && resource.equals(quad.resource) && texture.equals(quad.texture) && lightValue == quad.lightValue
+                && sprite.equals(quad.sprite);
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(count, type);
+        int result = Objects.hash(count, type, resource, texture);
         result = 31 * result + Arrays.hashCode(vertices);
         return result;
     }
 
-    private void validate() {
-        if (count < 4) {
-            throw new IllegalStateException();
-        }
-    }
+    public void updateUvBounds() {
+        validate();
 
-    private void setUvBounds() {
-        uvBounds = new UVBounds();
         Vector2f uv = vertices[0].getUv();
         uvBounds.uMin = uv.x;
         uvBounds.uMax = uv.x;
@@ -194,6 +269,19 @@ public class Quad {
             if (uv.x > uvBounds.uMax) uvBounds.uMax = uv.x;
             if (uv.y < uvBounds.vMin) uvBounds.vMin = uv.y;
             if (uv.y > uvBounds.vMax) uvBounds.vMax = uv.y;
+        }
+    }
+
+    private void addUvBounds() {
+        if (!hasUV()) return;
+
+        uvBounds = new UVBounds();
+        updateUvBounds();
+    }
+
+    private void validate() {
+        if (count != 4) {
+            throw new IllegalStateException("Quad does not have 4 vertices");
         }
     }
 }

@@ -18,6 +18,23 @@ public class UVBounds {
         this.vMax = other.vMax;
     }
 
+    public UVBounds(float uMin, float uMax, float vMin, float vMax) {
+        this.uMin = uMin;
+        this.uMax = uMax;
+        this.vMin = vMin;
+        this.vMax = vMax;
+    }
+
+    public UVBounds clamped() {
+        UVBounds clampedBounds = new UVBounds();
+        clampedBounds.uMin = Math.max(0.0F, this.uMin);
+        clampedBounds.uMax = Math.min(1.0F, this.uMax);
+        clampedBounds.vMin = Math.max(0.0F, this.vMin);
+        clampedBounds.vMax = Math.min(1.0F, this.vMax);
+
+        return clampedBounds;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -27,6 +44,11 @@ public class UVBounds {
                 Float.compare(uvBounds.uMax, uMax) == 0 &&
                 Float.compare(uvBounds.vMin, vMin) == 0 &&
                 Float.compare(uvBounds.vMax, vMax) == 0;
+    }
+
+    @Override
+    public String toString() {
+        return "uMin: " + uMin + ", uMax: " + uMax + ", vMin: " + vMin + ", vMax: " + vMax;
     }
 
     @Override
