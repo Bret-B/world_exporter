@@ -29,7 +29,8 @@ set_nonzero_specular = 0.2  # default specular value to be used for materials wi
 
 def merge_water(selected_objects):
     water_mats = set()
-    is_water = ('minecraft-block-water-flow', 'minecraft-block-water-still', 'minecraft-block-water-overlay')
+    is_water = ('minecraft-block-water-flow', 'minecraft-block-water-still', 'minecraft-block-water-overlay',
+     'minecraft-blocks-water-flow', 'minecraft-blocks-water-still', 'minecraft-blocks-water-overlay')
     for selected_object in bpy.context.selected_objects:
         water_mats.update([mat for mat in selected_object.data.materials if mat.name_full.startswith(is_water)])
     water_mats = list(water_mats)
@@ -67,8 +68,7 @@ for selected_object in bpy.context.selected_objects:
                 
                 if node.inputs['Alpha'].is_linked:
                     mat.blend_method = 'HASHED'
-                    mat.shadow_method = 'HASHED'
-                    
+
                     if cycles and backface_culling:
                         mix_shader = mat.node_tree.nodes.new('ShaderNodeMixShader')
                         mix_shader.location = (250, 500)
