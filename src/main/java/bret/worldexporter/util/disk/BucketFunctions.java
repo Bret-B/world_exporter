@@ -1,7 +1,7 @@
 package bret.worldexporter.util.disk;
 
 public class BucketFunctions {
-    private static final long RING_WIDTH = 32L;
+    private static final long RING_WIDTH = 128L;
 
     public static long xzLocalityBucket(int x, int z, int sqrtChunksPerBucket) {
         long result = z / sqrtChunksPerBucket;
@@ -15,8 +15,8 @@ public class BucketFunctions {
         long ringsFromCenter = maxCardinalFromCenter / RING_WIDTH;
         long ringArea = squareHollowRingArea(ringsFromCenter);
         long bucketsInRing = ringArea / chunksPerBucket / 256L;
-        long bucketsPerSide = bucketsInRing / 4;
-        long increment = ringsFromCenter / bucketsPerSide;
+        long bucketsPerSide = Math.max(1, bucketsInRing / 4);
+        long increment = Math.max(1, ringsFromCenter / bucketsPerSide);
         long xHash = (2 * absX) / increment;
         long zHash = (2 * absZ) / increment;
         return ((0xFFFFFL & xHash) << 40) | ((0xFFFFFL & zHash) << 20) | (0xFFFFFL & ringsFromCenter);

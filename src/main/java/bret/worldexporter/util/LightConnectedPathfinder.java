@@ -2,6 +2,9 @@ package bret.worldexporter.util;
 
 import bret.worldexporter.Exporter;
 import bret.worldexporter.WorldExporterClient;
+import bret.worldexporter.util.disk.BucketFunctions;
+import bret.worldexporter.util.disk.DiskBackedBucketedLongHashSet;
+import bret.worldexporter.util.disk.SimpleSet;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
@@ -17,6 +20,7 @@ import net.minecraft.util.math.shapes.VoxelShapes;
 import net.minecraft.world.LightType;
 import org.apache.commons.lang3.tuple.Pair;
 
+import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.Set;
 
@@ -27,6 +31,8 @@ public class LightConnectedPathfinder {
     private final ClientWorld world;
     private final BlockPos segmentLow;
     private final BlockPos segmentHigh;
+    private final int centerX;
+    private final int centerZ;
     private final boolean sidesAreForced;
 
     public LightConnectedPathfinder(Exporter exporter, ClientWorld world) {
@@ -37,6 +43,8 @@ public class LightConnectedPathfinder {
                 exporter.getStartPosClampedHeight());
         this.segmentLow = lowHigh.getLeft();
         this.segmentHigh = lowHigh.getRight();
+        this.centerX = (segmentHigh.getX() + segmentLow.getX()) / 2;
+        this.centerZ = (segmentHigh.getZ() + segmentLow.getZ()) / 2;
         this.sidesAreForced = exporter.sidesAreForced;
     }
 
@@ -48,6 +56,8 @@ public class LightConnectedPathfinder {
                 segmentEnd);
         this.segmentLow = lowHigh.getLeft();
         this.segmentHigh = lowHigh.getRight();
+        this.centerX = (segmentHigh.getX() + segmentLow.getX()) / 2;
+        this.centerZ = (segmentHigh.getZ() + segmentLow.getZ()) / 2;
         this.sidesAreForced = exporter.sidesAreForced;
     }
 
@@ -67,7 +77,11 @@ public class LightConnectedPathfinder {
         }
     }
 
-    private void getNeighbors(BlockPos pos, Set<Long> seen, Set<Long> alreadyAdded, Collection<Long> hasLight, Collection<Long> sideLit) {
+    private void getNeighbors(BlockPos pos,
+                              SimpleSet<Long> seen,
+                              SimpleSet<Long> alreadyAdded,
+                              Collection<Long> hasLight,
+                              Collection<Long> sideLit) {
         BlockState stateAtPos = world.getBlockState(pos);
         hasLight.clear();
         sideLit.clear();
@@ -111,16 +125,33 @@ public class LightConnectedPathfinder {
         }
     }
 
-    public Set<Long> lightConnectedBlockSet(int maxRange) {
-        LongOpenHashSet allLightConnected = new LongOpenHashSet();
+    private static long doBucket(long pos) {
+        return BucketFunctions.xzLocalityBucket(BlockPos.getX(pos), BlockPos.getZ(pos), 4);
+    }
+
+//    private long doBucket(long pos) {
+//        return BucketFunctions.centerBasedRingBucket(centerX, centerZ, BlockPos.getX(pos), BlockPos.getZ(pos), 512);
+//    }
+
+    public SimpleSet<Long> lightConnectedBlockSet(int maxRange, boolean isFullRange) {
         double blockVolumeLowEstimate = blockVolume(segmentLow, segmentHigh) * 0.1;
         int blockVolume = blockVolumeLowEstimate > Integer.MAX_VALUE ? Integer.MAX_VALUE / 2 : (int) blockVolumeLowEstimate;
         // Note: to have blocks have 0 cost for light transfer instead of 1, it would be sufficient to
         //  use two queues and always remove from queue 1 first if possible instead of using a priority queue structure
+        String cacheBase = Paths.get(WorldExporterClient.getExportDirectory().getPath(), "cache").toString();
+        SimpleSet<Long> allLightConnected = new DiskBackedBucketedLongHashSet(
+                128 * (isFullRange ? 256 : 1), cacheBase, LightConnectedPathfinder::doBucket);
+        SimpleSet<Long> seen = new DiskBackedBucketedLongHashSet(
+                128 * (isFullRange ? 256 : 1), cacheBase, LightConnectedPathfinder::doBucket);
+        SimpleSet<Long> inUnexplored = new DiskBackedBucketedLongHashSet(
+                128 * (isFullRange ? 256 : 1), cacheBase, LightConnectedPathfinder::doBucket);
         LongArrayFIFOQueue unexplored = new LongArrayFIFOQueue(blockVolume);
-        LongOpenHashSet seen = new LongOpenHashSet(blockVolume);
-        LongOpenHashSet inUnexplored = new LongOpenHashSet();
+
         Long2IntOpenHashMap distanceToSkylight = new Long2IntOpenHashMap();
+        // A default return value of 0 allows block positions with skylight to not be added.
+        // Since all blocks with skylight are added to the queue at the start, this is fine
+        distanceToSkylight.defaultReturnValue(0);
+
         LongArrayList hasLightReusable = new LongArrayList(6);
         LongArrayList sideLitReusable = new LongArrayList(6);
 
@@ -144,10 +175,6 @@ public class LightConnectedPathfinder {
                 inUnexplored.add(pos);
             }
         }
-
-        // A default return value of 0 allows block positions with skylight to not be added.
-        // Since all blocks with skylight are added to the queue at the start, this is fine
-        distanceToSkylight.defaultReturnValue(0);
 
         while (!unexplored.isEmpty()) {
             long unexploredLong = unexplored.dequeueLong();

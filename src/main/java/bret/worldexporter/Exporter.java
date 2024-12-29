@@ -3,6 +3,7 @@ package bret.worldexporter;
 import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.render.CustomBlockRendererDispatcher;
 import bret.worldexporter.util.*;
+import bret.worldexporter.util.disk.SimpleSet;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.client.renderer.Atlases;
@@ -406,11 +407,11 @@ public class Exporter {
         }
 
         // Build the entire light connected set if segmentation is disabled.
-        AtomicReference<Set<Long>> lightConnected = new AtomicReference<>();
+        AtomicReference<SimpleSet<Long>> lightConnected = new AtomicReference<>();
         if (WorldExporterConfig.CLIENT.exportVisibleExteriorOnly.get() && !WorldExporterConfig.CLIENT.segmentedExteriorPathfinding.get()) {
             Runnable task = () -> {
                 LightConnectedPathfinder lightFinder = new LightConnectedPathfinder(this, world);
-                lightConnected.set(lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get()));
+                lightConnected.set(lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get(), true));
             };
             if (WorldExporterClient.canRequestChunks()) {
                 ChunkThreadSyncManager.reset(1);

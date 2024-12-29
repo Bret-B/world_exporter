@@ -27,7 +27,7 @@ import static bret.worldexporter.WorldExporter.LOGGER;
 
 public class ObjExporter extends Exporter {
     private final static String TEXTURE_DIR = "tex";
-    private final File baseDir = new File(Minecraft.getInstance().gameDirectory, "worldexporter/worlddump" + java.time.LocalDateTime.now().toString().replace(':', '-'));
+    private final File baseDir = WorldExporterClient.getExportDirectory();
     private final File texturePath = new File(baseDir, TEXTURE_DIR);
     // geometric vertices cache (tag v) for the .obj output which maps the vertex to its number in the file
     private final Map<Vector3f, Integer> verticesCache = new LRUCache<>(40000);
@@ -56,7 +56,7 @@ public class ObjExporter extends Exporter {
         setup();
         Files.createDirectories(texturePath.toPath());
         String fullMtlFilename = mtlBaseFilename + ".mtl";
-        File mtlFile = new File(baseDir, fullMtlFilename);
+        File mtlFile = new File(WorldExporterClient.getExportDirectory(), fullMtlFilename);
         boolean success = true;
 
         try (FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlBWriter = new BufferedWriter(mtlWriter, 8 << 20)) {  // 8 MB buffer

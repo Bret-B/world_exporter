@@ -6,6 +6,7 @@ import bret.worldexporter.legacylwjgl.Vector3f;
 import bret.worldexporter.util.BlockPosUtils;
 import bret.worldexporter.util.LightConnectedPathfinder;
 import bret.worldexporter.util.ReflectionHandler;
+import bret.worldexporter.util.disk.SimpleSet;
 import com.mojang.blaze3d.matrix.MatrixStack;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockRenderType;
@@ -77,11 +78,11 @@ class ExporterRunnable implements Runnable {
     private BlockPos lastFallbackBlock;
     private UUID lastFallbackEntityUUID;
     private boolean lastFallbackIsBlock;
-    private Set<Long> lightConnected;
+    private SimpleSet<Long> lightConnected;
 
     @SuppressWarnings("unchecked")
     public ExporterRunnable(Exporter exporter, Collection<Pair<BlockPos, BlockPos>> chunkBoundaries,
-                            boolean threadSafe, Consumer<ArrayList<ExportChunk>> chunkConsumer, int chunksPerConsume, @Nullable Set<Long> lightConnected) {
+                            boolean threadSafe, Consumer<ArrayList<ExportChunk>> chunkConsumer, int chunksPerConsume, @Nullable SimpleSet<Long> lightConnected) {
         this.exporter = exporter;
         this.chunkBoundaries = chunkBoundaries;
         this.threadSafe = threadSafe;
@@ -157,6 +158,7 @@ class ExporterRunnable implements Runnable {
             }
         } catch (Throwable e) {
             LOGGER.error("ExporterRunnable crashed while exporting: ", e);
+            e.printStackTrace();
         }
 
         // The thread is done: release it from the semaphore so that it doesn't block other threads in a finished state
@@ -210,13 +212,16 @@ class ExporterRunnable implements Runnable {
 
         boolean useLightConnected = WorldExporterConfig.CLIENT.exportVisibleExteriorOnly.get();
         boolean segmentLightConnectionBuilding = WorldExporterConfig.CLIENT.segmentedExteriorPathfinding.get();
+        boolean lightNeedsSync = true;
         if (useLightConnected && segmentLightConnectionBuilding) {
             int segmentChunkDistance = WorldExporterConfig.CLIENT.segmentChunkRadius.get();
             Pair<BlockPos, BlockPos> segment = BlockPosUtils.extendChunks(start, end, segmentChunkDistance);
             LightConnectedPathfinder lightFinder = new LightConnectedPathfinder(exporter, exporter.world, segment.getLeft(), segment.getRight());
-            lightConnected = lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get());
+            lightConnected = lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get(), false);
+            lightNeedsSync = false;
         }
 
+        final SimpleSet<Long> lightConnectedSet = lightConnected;
         Random random = new Random();
         MatrixStack matrixStack = new MatrixStack();
         float partialTicks = Minecraft.getInstance().getFrameTime();
@@ -225,8 +230,16 @@ class ExporterRunnable implements Runnable {
         BlockPos endClampedHeight = new BlockPos(end.getX(),
                 Math.max(WORLD_LOWER_HEIGHT_LIMIT, Math.min(WORLD_HEIGHT_LIMIT, end.getY())), end.getZ());
         for (BlockPos pos : BlockPos.betweenClosed(startClampedHeight, endClampedHeight)) {
-            if (useLightConnected && !lightConnected.contains(pos.asLong())) {
-                continue;
+            if (useLightConnected) {
+                if (lightNeedsSync) {
+                    synchronized (lightConnectedSet) {
+                        if (!lightConnected.contains(pos.asLong())) {
+                            continue;
+                        }
+                    }
+                } else if (!lightConnected.contains(pos.asLong())) {
+                    continue;
+                }
             }
 
             BlockState state = chunk.getBlockState(pos);

@@ -3,6 +3,7 @@ package bret.worldexporter.util.disk;
 import bret.worldexporter.util.NotifyingLRUCache;
 import it.unimi.dsi.fastutil.io.BinIO;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 
 import java.io.File;
 import java.io.IOException;
@@ -13,8 +14,9 @@ import java.nio.file.Paths;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-public class DiskBackedBuckets<BucketValue extends Serializable> {
+class DiskBackedBuckets<BucketValue extends Serializable> {
     private final NotifyingLRUCache<Long, BucketValue> memoryBuckets;
+    private final LongOpenHashSet dirty = new LongOpenHashSet();
     private final Long2ObjectOpenHashMap<String> diskBuckets = new Long2ObjectOpenHashMap<>();
     private final Supplier<BucketValue> bucketValueSupplier;
     private final Path directory;
@@ -38,6 +40,7 @@ public class DiskBackedBuckets<BucketValue extends Serializable> {
     public void clear() {
         memoryBuckets.clear();
         diskBuckets.clear();
+        dirty.clear();
     }
 
     public BucketValue getBucket(long bucketKey) {
@@ -53,7 +56,7 @@ public class DiskBackedBuckets<BucketValue extends Serializable> {
         }
 
         if (diskBuckets.containsKey(bucketKey)) {
-            // load the bucket from disk and move it to memory
+            // load the bucket from disk and move it to memory - not dirty yet
             try {
                 //noinspection unchecked
                 result = (BucketValue) BinIO.loadObject(new File(bucketPath(bucketKey).toString()));
@@ -66,20 +69,30 @@ public class DiskBackedBuckets<BucketValue extends Serializable> {
             // create and register the bucket
             result = bucketValueSupplier.get();
             memoryBuckets.put(bucketKey, result);
+            dirty.add(bucketKey);
         }
 
         return result;
     }
 
-    // called when the bucket is being removed from memory: save to disk
+    public void setDirty(long bucketKey) {
+        dirty.add(bucketKey);
+    }
+
+    // called when the bucket is being removed from memory: save to disk if dirty
     private void onMemoryRemove(long bucketKey, BucketValue bucket) {
         String pathToBucket = bucketPath(bucketKey).toString();
-        try {
-            BinIO.storeObject(bucket, new File(pathToBucket));
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
         diskBuckets.put(bucketKey, pathToBucket);
+
+        // skip the write if it hasn't changed
+        if (dirty.contains(bucketKey)) {
+            try {
+                BinIO.storeObject(bucket, new File(pathToBucket));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            dirty.remove(bucketKey);
+        }
     }
 
     private Path bucketPath(long bucketKey) {

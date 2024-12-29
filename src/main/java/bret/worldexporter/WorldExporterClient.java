@@ -15,6 +15,7 @@ import net.minecraftforge.client.event.ClientChatEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.concurrent.BrokenBarrierException;
@@ -37,6 +38,11 @@ public class WorldExporterClient {
     public static final CyclicBarrier receivedPermissionsBarrier = new CyclicBarrier(2);
     public static final AtomicBoolean stateResponseValid = new AtomicBoolean(false);
     public static final CyclicBarrier receivedStateResponseBarrier = new CyclicBarrier(2);
+    private static File baseDir = null;
+
+    public static File getExportDirectory() {
+        return baseDir;
+    }
 
     public static boolean isClientExporting() {
         return clientExporting;
@@ -126,6 +132,11 @@ public class WorldExporterClient {
             );
             return;
         }
+
+        WorldExporterClient.baseDir = new File(
+                Minecraft.getInstance().gameDirectory,
+                "worldexporter/worlddump"
+                        + java.time.LocalDateTime.now().toString().replace(':', '-'));
 
         clientExporting = true;
         boolean doExport = sendInitialPackets();
