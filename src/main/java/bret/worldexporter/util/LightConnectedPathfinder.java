@@ -2,13 +2,9 @@ package bret.worldexporter.util;
 
 import bret.worldexporter.Exporter;
 import bret.worldexporter.WorldExporterClient;
-import bret.worldexporter.util.disk.BucketFunctions;
-import bret.worldexporter.util.disk.DiskBackedBucketedLongHashSet;
-import bret.worldexporter.util.disk.SimpleSet;
-import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import bret.worldexporter.util.disk.*;
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
-import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.util.Direction;
@@ -22,9 +18,6 @@ import org.apache.commons.lang3.tuple.Pair;
 
 import java.nio.file.Paths;
 import java.util.Collection;
-import java.util.Set;
-
-import static bret.worldexporter.util.BlockPosUtils.blockVolume;
 
 public class LightConnectedPathfinder {
     private final Exporter exporter;
@@ -125,32 +118,29 @@ public class LightConnectedPathfinder {
         }
     }
 
-    private static long doBucket(long pos) {
-        return BucketFunctions.xzLocalityBucket(BlockPos.getX(pos), BlockPos.getZ(pos), 4);
+    private static long xzBucket(long pos) {
+        return BucketFunctions.xzLocalityBucket(BlockPos.getX(pos), BlockPos.getZ(pos), 2);
     }
 
-//    private long doBucket(long pos) {
-//        return BucketFunctions.centerBasedRingBucket(centerX, centerZ, BlockPos.getX(pos), BlockPos.getZ(pos), 512);
-//    }
+    private long ringBucket(long pos) {
+        return BucketFunctions.centerBasedRingBucket(centerX, centerZ, BlockPos.getX(pos), BlockPos.getZ(pos), 16);
+    }
 
     public SimpleSet<Long> lightConnectedBlockSet(int maxRange, boolean isFullRange) {
-        double blockVolumeLowEstimate = blockVolume(segmentLow, segmentHigh) * 0.1;
-        int blockVolume = blockVolumeLowEstimate > Integer.MAX_VALUE ? Integer.MAX_VALUE / 2 : (int) blockVolumeLowEstimate;
         // Note: to have blocks have 0 cost for light transfer instead of 1, it would be sufficient to
         //  use two queues and always remove from queue 1 first if possible instead of using a priority queue structure
+        int buckets = isFullRange ? 1024 : 32;
         String cacheBase = Paths.get(WorldExporterClient.getExportDirectory().getPath(), "cache").toString();
-        SimpleSet<Long> allLightConnected = new DiskBackedBucketedLongHashSet(
-                128 * (isFullRange ? 256 : 1), cacheBase, LightConnectedPathfinder::doBucket);
-        SimpleSet<Long> seen = new DiskBackedBucketedLongHashSet(
-                128 * (isFullRange ? 256 : 1), cacheBase, LightConnectedPathfinder::doBucket);
-        SimpleSet<Long> inUnexplored = new DiskBackedBucketedLongHashSet(
-                128 * (isFullRange ? 256 : 1), cacheBase, LightConnectedPathfinder::doBucket);
-        LongArrayFIFOQueue unexplored = new LongArrayFIFOQueue(blockVolume);
+        SimpleSet<Long> allLightConnected = new DiskBackedBucketedLongHashSet(buckets * 2, cacheBase, LightConnectedPathfinder::xzBucket);
+        SimpleSet<Long> seen = new DiskBackedBucketedLongHashSet(buckets * 2, cacheBase, LightConnectedPathfinder::xzBucket);
+        SimpleSet<Long> inUnexplored = new DiskBackedBucketedLongHashSet(buckets, cacheBase, LightConnectedPathfinder::xzBucket);
+        DiskBackedBucketedLongFIFOQueue unexplored = new DiskBackedBucketedLongFIFOQueue(4, 1024 * 4096, cacheBase);
+//        LongArrayFIFOQueue unexplored = new LongArrayFIFOQueue();
 
-        Long2IntOpenHashMap distanceToSkylight = new Long2IntOpenHashMap();
         // A default return value of 0 allows block positions with skylight to not be added.
         // Since all blocks with skylight are added to the queue at the start, this is fine
-        distanceToSkylight.defaultReturnValue(0);
+        DiskBackedBucketedLong2IntHashMap distanceToSkylight = new DiskBackedBucketedLong2IntHashMap(buckets,
+                cacheBase, LightConnectedPathfinder::xzBucket, 0);
 
         LongArrayList hasLightReusable = new LongArrayList(6);
         LongArrayList sideLitReusable = new LongArrayList(6);

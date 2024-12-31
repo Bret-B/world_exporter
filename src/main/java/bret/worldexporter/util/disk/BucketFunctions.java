@@ -4,8 +4,8 @@ public class BucketFunctions {
     private static final long RING_WIDTH = 128L;
 
     public static long xzLocalityBucket(int x, int z, int sqrtChunksPerBucket) {
-        long result = z / sqrtChunksPerBucket;
-        return result | ((long) (x / sqrtChunksPerBucket) << 32);
+        long result = (long)((z >> 4) / sqrtChunksPerBucket) & 0xFFFFFFFFL;
+        return result | (((long)((x >> 4) / sqrtChunksPerBucket) & 0xFFFFFFFFL) << 32);
     }
 
     public static long centerBasedRingBucket(int centerX, int centerZ, int x, int z, int chunksPerBucket) {

@@ -52,6 +52,10 @@ public class DiskBackedBucketedLongHashSet implements SimpleSet<Long> {
             return true;
         }
 
+        if (bucket.isEmpty()) {
+            buckets.removeBucket(bucketKey);
+        }
+
         return false;
     }
 
