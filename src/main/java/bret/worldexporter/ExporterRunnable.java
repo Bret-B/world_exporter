@@ -108,6 +108,7 @@ class ExporterRunnable implements Runnable {
     }
 
     private boolean runThreadSafe(Runnable task) throws InterruptedException, ExecutionException {
+        boolean result;
         if (threadSafe) {
             RunnableFuture<Boolean> futureTask = new FutureTask<>(() -> {
                 try {
@@ -118,17 +119,22 @@ class ExporterRunnable implements Runnable {
                     return false;
                 }
             });
+            ChunkThreadSyncManager.release();
             exporter.addMainThreadTask(futureTask);
-            return futureTask.get();
+            result = futureTask.get();
+            ChunkThreadSyncManager.waitForThreadsReady();
+            ChunkThreadSyncManager.acquire();
         } else {
             try {
                 task.run();
-                return true;
+                result = true;
             } catch (Throwable e) {
                 LOGGER.warn("Failed to run a task on thread: ", e);
-                return false;
+                result = false;
             }
         }
+
+        return result;
     }
 
     @Override
@@ -329,13 +335,20 @@ class ExporterRunnable implements Runnable {
                     if (!threadSafe) {
                         ensureEmptyMatrixStack(matrixStack);
                         matrixStack.pushPose();
-                        exporter.addMainThreadTask(() -> {
+                        RunnableFuture<Boolean> entityFuture = new FutureTask<>(() -> {
                             try {
-                                runThreadSafe(renderEntity);
+                                renderEntity.run();
+                                return true;
                             } catch (Throwable e) {
                                 LOGGER.error("Unknown error while exporting entity on main thread: " + entity + '\n', e);
+                                return false;
                             }
                         });
+                        ChunkThreadSyncManager.release();
+                        exporter.addMainThreadTask(entityFuture);
+                        entityFuture.get();
+                        ChunkThreadSyncManager.waitForThreadsReady();
+                        ChunkThreadSyncManager.acquire();
                     } else {
                         // the failure was not threading related, so there's nothing that can be done
                         LOGGER.error("Unknown error while exporting entity on main thread: " + entity + '\n');

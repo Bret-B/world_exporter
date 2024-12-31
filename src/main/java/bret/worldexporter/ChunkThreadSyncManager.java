@@ -32,7 +32,7 @@ public class ChunkThreadSyncManager {
         // semaphore starts with 0 permits because threads are working when they start
         threadSyncRequiredTasks.clear();
         threadSyncSemaphore.drainPermits();
-        threadsShouldResume.set(false);
+        threadsShouldResume.set(true);
         requestsDisabled.set(false);
         pendingChunks.clear();
         chunkPartsReceived.clear();
@@ -41,6 +41,7 @@ public class ChunkThreadSyncManager {
     }
 
     public static void add(Runnable task) {
+        threadsShouldResume.set(false);
         threadSyncRequiredTasks.add(task);
     }
 
@@ -161,7 +162,6 @@ public class ChunkThreadSyncManager {
         if (!isMainThread()) {
             throw new RuntimeException("mainThreadEventLoop() must be ran on the main thread!");
         }
-        threadsShouldResume.set(false);
 
         if (returnIfCannotSync && !readyToSync()) {
             return;
