@@ -29,7 +29,7 @@ import static bret.worldexporter.WorldExporter.LOGGER;
 
 @Mod.EventBusSubscriber(modid = WorldExporter.MODID, value = Dist.CLIENT)
 public class WorldExporterClient {
-    private static final String CMD_BASE = "/worldexport";
+    private static final String CMD_BASE = "/worldexport ";
     private static boolean clientExporting = false;
     private static boolean canRequestChunks = false;
     private static boolean canPauseServer = false;

@@ -208,10 +208,10 @@ class ExporterRunnable implements Runnable {
         while (!matrixStack.clear()) matrixStack.popPose();
     }
 
-    private ArrayList<Quad> getNextChunkData(BlockPos start, BlockPos end) throws InterruptedException, ExecutionException {
+    private ArrayList<Quad> getNextChunkData(BlockPos low, BlockPos high) throws InterruptedException, ExecutionException {
         reset();
         ArrayList<Quad> quads = new ArrayList<>();
-        Chunk chunk = exporter.world.getChunkAt(start);
+        Chunk chunk = exporter.world.getChunkAt(low);
         if (chunk.isEmpty()) {
             return quads;
         }
@@ -221,7 +221,7 @@ class ExporterRunnable implements Runnable {
         boolean lightNeedsSync = true;
         if (useLightConnected && segmentLightConnectionBuilding) {
             int segmentChunkDistance = WorldExporterConfig.CLIENT.segmentChunkRadius.get();
-            Pair<BlockPos, BlockPos> segment = BlockPosUtils.extendChunks(start, end, segmentChunkDistance);
+            Pair<BlockPos, BlockPos> segment = BlockPosUtils.extendChunks(low, high, segmentChunkDistance);
             LightConnectedPathfinder lightFinder = new LightConnectedPathfinder(exporter, exporter.world, segment.getLeft(), segment.getRight());
             lightConnected = lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get(), false);
             lightNeedsSync = false;
@@ -231,11 +231,11 @@ class ExporterRunnable implements Runnable {
         Random random = new Random();
         MatrixStack matrixStack = new MatrixStack();
         float partialTicks = Minecraft.getInstance().getFrameTime();
-        BlockPos startClampedHeight = new BlockPos(start.getX(),
-                Math.max(WORLD_LOWER_HEIGHT_LIMIT, Math.min(WORLD_HEIGHT_LIMIT, start.getY())), start.getZ());
-        BlockPos endClampedHeight = new BlockPos(end.getX(),
-                Math.max(WORLD_LOWER_HEIGHT_LIMIT, Math.min(WORLD_HEIGHT_LIMIT, end.getY())), end.getZ());
-        for (BlockPos pos : BlockPos.betweenClosed(startClampedHeight, endClampedHeight)) {
+        BlockPos lowClampedHeight = new BlockPos(low.getX(),
+                Math.max(WORLD_LOWER_HEIGHT_LIMIT, Math.min(WORLD_HEIGHT_LIMIT, low.getY())), low.getZ());
+        BlockPos highClampedHeight = new BlockPos(high.getX(),
+                Math.max(WORLD_LOWER_HEIGHT_LIMIT, Math.min(WORLD_HEIGHT_LIMIT, high.getY())), high.getZ());
+        for (BlockPos pos : BlockPosUtils.betweenClosedXZY(lowClampedHeight, highClampedHeight)) {
             if (useLightConnected) {
                 if (lightNeedsSync) {
                     synchronized (lightConnectedSet) {
@@ -319,7 +319,7 @@ class ExporterRunnable implements Runnable {
         // export all entities within chunk
         if (WorldExporterConfig.CLIENT.enableEntities.get()) {
             boolean skipLiving = !WorldExporterConfig.CLIENT.enableLivingEntities.get();
-            for (Entity entity : exporter.world.getEntities(null, new AxisAlignedBB(start, end))) {
+            for (Entity entity : exporter.world.getEntities(null, new AxisAlignedBB(low, high))) {
                 if (skipLiving && entity instanceof LivingEntity) continue;
 
                 preEntity(entity.getUUID());

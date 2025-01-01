@@ -134,10 +134,10 @@ public class BlockPosUtils {
         );
     }
 
-    public static long blockVolume(int pX1, int pY1, int pZ1, int pX2, int pY2, int pZ2) {
-        long xWidth = Math.abs(pX1 - pX2) + 1;
-        long zWidth = Math.abs(pZ1 - pZ2) + 1;
-        long height = Math.abs(pY1 - pY2) + 1;
+    public static long blockVolume(int xLow, int yLow, int zLow, int xHigh, int yHigh, int zHigh) {
+        long xWidth = Math.abs(xLow - xHigh) + 1;
+        long zWidth = Math.abs(zLow - zHigh) + 1;
+        long height = Math.abs(yLow - yHigh) + 1;
         return xWidth * zWidth * height;
     }
 
@@ -145,14 +145,18 @@ public class BlockPosUtils {
         return blockVolume(a.getX(), a.getY(), a.getZ(), b.getX(), b.getY(), b.getZ());
     }
 
+    public static Iterable<BlockPos> betweenClosedXZY(Pair<BlockPos, BlockPos> lowHigh) {
+        return betweenClosedXZY(lowHigh.getLeft(), lowHigh.getRight());
+    }
+
     public static Iterable<BlockPos> betweenClosedXZY(BlockPos low, BlockPos high) {
         return betweenClosedXZY(low.getX(), low.getY(), low.getZ(), high.getX(), high.getY(), high.getZ());
     }
 
-    public static Iterable<BlockPos> betweenClosedXZY(int pX1, int pY1, int pZ1, int pX2, int pY2, int pZ2) {
-        int i = pX2 - pX1 + 1;
-        int j = pY2 - pY1 + 1;
-        int k = pZ2 - pZ1 + 1;
+    public static Iterable<BlockPos> betweenClosedXZY(int xLow, int yLow, int zLow, int xHigh, int yHigh, int zHigh) {
+        int i = xHigh - xLow + 1;
+        int j = yHigh - yLow + 1;
+        int k = zHigh - zLow + 1;
         int l = i * j * k;
         return () -> new AbstractIterator<BlockPos>() {
             private final BlockPos.Mutable cursor = new BlockPos.Mutable();
@@ -167,7 +171,7 @@ public class BlockPosUtils {
                     int l1 = j1 % k;
                     int k1 = j1 / k;
                     ++this.index;
-                    return this.cursor.set(pX1 + i1, pY1 + k1, pZ1 + l1);
+                    return this.cursor.set(xLow + i1, yLow + k1, zLow + l1);
                 }
             }
         };
@@ -177,10 +181,10 @@ public class BlockPosUtils {
         return betweenClosedYXZ(low.getX(), low.getY(), low.getZ(), high.getX(), high.getY(), high.getZ());
     }
 
-    public static Iterable<BlockPos> betweenClosedYXZ(int pX1, int pY1, int pZ1, int pX2, int pY2, int pZ2) {
-        int i = pX2 - pX1 + 1;
-        int j = pY2 - pY1 + 1;
-        int k = pZ2 - pZ1 + 1;
+    public static Iterable<BlockPos> betweenClosedYXZ(int xLow, int yLow, int zLow, int xHigh, int yHigh, int zHigh) {
+        int i = xHigh - xLow + 1;
+        int j = yHigh - yLow + 1;
+        int k = zHigh - zLow + 1;
         int l = i * j * k;
         return () -> new AbstractIterator<BlockPos>() {
             private final BlockPos.Mutable cursor = new BlockPos.Mutable();
@@ -195,7 +199,7 @@ public class BlockPosUtils {
                     int l1 = j1 % i;
                     int k1 = j1 / i;
                     ++this.index;
-                    return this.cursor.set(pX1 + l1, pY1 + i1, pZ1 + k1);
+                    return this.cursor.set(xLow + l1, yLow + i1, zLow + k1);
                 }
             }
         };
@@ -205,41 +209,51 @@ public class BlockPosUtils {
         return betweenClosedChunkOrder(low.getX(), low.getY(), low.getZ(), high.getX(), high.getY(), high.getZ());
     }
 
-    public static Iterable<BlockPos> betweenClosedChunkOrder(int pX1, int pY1, int pZ1, int pX2, int pY2, int pZ2) {
+    public static Iterable<BlockPos> betweenClosedChunkOrder(int xLow, int yLow, int zLow, int xHigh, int yHigh, int zHigh) {
         return () -> new AbstractIterator<BlockPos>() {
-            private int currentX = pX2;
-            private int currentZ = pZ2;
-            private Iterator<BlockPos> thisChunkIter = getNextChunkIter();
-
-            private Iterator<BlockPos> getNextChunkIter() {
-                int chunkXOffset = ((currentX % 16) + 16) % 16;
-                int chunkZOffset = ((currentZ % 16) + 16) % 16;
-                BlockPos thisChunkStart = new BlockPos(currentX, pY2, currentZ);
-                BlockPos thisChunkEnd = new BlockPos(
-                        Math.max(currentX - chunkXOffset, pX1),
-                        pY1,
-                        Math.max(currentZ - chunkZOffset, pZ1));
-
-                currentX -= (thisChunkStart.getX() - thisChunkEnd.getX() + 1);
-                if (currentX < pX1) {
-                    currentX = pX2;
-                    currentZ -= (thisChunkStart.getZ() - thisChunkEnd.getZ() + 1);
-                }
-
-                return betweenClosedXZY(thisChunkEnd, thisChunkStart).iterator();
-            }
+            private final Iterator<Pair<BlockPos, BlockPos>> chunkBoundariesIter = chunkBoundaries(
+                    xLow, yLow, zLow, xHigh, yHigh, zHigh).iterator();
+            private Iterator<BlockPos> withinChunkIter = betweenClosedXZY(chunkBoundariesIter.next()).iterator();
 
             protected BlockPos computeNext() {
-                if (thisChunkIter.hasNext()) {
-                    return thisChunkIter.next();
+                if (!withinChunkIter.hasNext()) {
+                    if (!chunkBoundariesIter.hasNext()) {
+                        return this.endOfData();
+                    }
+                    withinChunkIter = betweenClosedXZY(chunkBoundariesIter.next()).iterator();
                 }
 
-                if (currentX < pX1 || currentZ < pZ1) {
+                return withinChunkIter.next();
+            }
+        };
+    }
+
+    public static Iterable<Pair<BlockPos, BlockPos>> chunkBoundaries(BlockPos low, BlockPos high) {
+        return chunkBoundaries(low.getX(), low.getY(), low.getZ(), high.getX(), high.getY(), high.getZ());
+    }
+
+    public static Iterable<Pair<BlockPos, BlockPos>> chunkBoundaries(int xLow, int yLow, int zLow, int xHigh, int yHigh, int zHigh) {
+        return () -> new AbstractIterator<Pair<BlockPos, BlockPos>>() {
+            int currentX = xLow;
+            int currentZ = zLow;
+
+            protected Pair<BlockPos, BlockPos> computeNext() {
+                if (BlockPosUtils.lowestCoordinateInChunk(currentX) > xHigh) {
+                    currentX = xLow;
+                    currentZ += 16;
+                }
+                if (BlockPosUtils.lowestCoordinateInChunk(currentZ) > zHigh) {
                     return this.endOfData();
                 }
 
-                thisChunkIter = getNextChunkIter();
-                return thisChunkIter.next();
+                int chunkLowX = Math.max(BlockPosUtils.lowestCoordinateInChunk(currentX), xLow);
+                int chunkLowZ = Math.max(BlockPosUtils.lowestCoordinateInChunk(currentZ), zLow);
+                int chunkHighX = Math.min(BlockPosUtils.highestCoordinateInChunk(currentX), xHigh);
+                int chunkHighZ = Math.min(BlockPosUtils.highestCoordinateInChunk(currentZ), zHigh);
+                BlockPos low = new BlockPos(chunkLowX, yLow, chunkLowZ);
+                BlockPos high = new BlockPos(chunkHighX, yHigh, chunkHighZ);
+                currentX += 16;
+                return Pair.of(low, high);
             }
         };
     }
