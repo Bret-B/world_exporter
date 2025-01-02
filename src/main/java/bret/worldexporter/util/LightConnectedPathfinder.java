@@ -3,7 +3,6 @@ package bret.worldexporter.util;
 import bret.worldexporter.Exporter;
 import bret.worldexporter.WorldExporterClient;
 import bret.worldexporter.util.disk.*;
-import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.world.ClientWorld;
@@ -32,8 +31,8 @@ public class LightConnectedPathfinder {
         this.exporter = exporter;
         this.world = world;
         Pair<BlockPos, BlockPos> lowHigh = BlockPosUtils.blockPosMinMax(
-                exporter.getEndPosClampedHeight(),
-                exporter.getStartPosClampedHeight());
+                exporter.getLowPosClampedHeight(),
+                exporter.getHighPosClampedHeight());
         this.segmentLow = lowHigh.getLeft();
         this.segmentHigh = lowHigh.getRight();
         this.centerX = (segmentHigh.getX() + segmentLow.getX()) / 2;
@@ -119,26 +118,25 @@ public class LightConnectedPathfinder {
     }
 
     private static long xzBucket(long pos) {
-        return BucketFunctions.xzLocalityBucket(BlockPos.getX(pos), BlockPos.getZ(pos), 2);
+        return BucketFunctions.xzLocalityBucket(BlockPos.getX(pos), BlockPos.getZ(pos), 16);
     }
 
     private long ringBucket(long pos) {
-        return BucketFunctions.centerBasedRingBucket(centerX, centerZ, BlockPos.getX(pos), BlockPos.getZ(pos), 16);
+        return BucketFunctions.centerBasedRingBucket(centerX, centerZ, BlockPos.getX(pos), BlockPos.getZ(pos), 256);
     }
 
     public SimpleSet<Long> lightConnectedBlockSet(int maxRange, boolean isFullRange) {
         // Note: to have blocks have 0 cost for light transfer instead of 1, it would be sufficient to
         //  use two queues and always remove from queue 1 first if possible instead of using a priority queue structure
-        int buckets = isFullRange ? 1024 : 32;
+        int buckets = isFullRange ? 4096 : 64;
         String cacheBase = Paths.get(WorldExporterClient.getExportDirectory().getPath(), "cache").toString();
-        SimpleSet<Long> allLightConnected = new DiskBackedBucketedLongHashSet(buckets * 2, cacheBase, LightConnectedPathfinder::xzBucket);
-        SimpleSet<Long> seen = new DiskBackedBucketedLongHashSet(buckets * 2, cacheBase, LightConnectedPathfinder::xzBucket);
-        SimpleSet<Long> inUnexplored = new DiskBackedBucketedLongHashSet(buckets, cacheBase, LightConnectedPathfinder::xzBucket);
-        DiskBackedBucketedLongFIFOQueue unexplored = new DiskBackedBucketedLongFIFOQueue(4, 1024 * 4096, cacheBase);
-//        LongArrayFIFOQueue unexplored = new LongArrayFIFOQueue();
+        SimpleSet<Long> allLightConnected = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
+        SimpleSet<Long> seen = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
+        SimpleSet<Long> inUnexplored = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
+        DiskBackedBucketedLongFIFOQueue unexplored = new DiskBackedBucketedLongFIFOQueue(4, 4096 * 4096, cacheBase);
 
-        // A default return value of 0 allows block positions with skylight to not be added.
-        // Since all blocks with skylight are added to the queue at the start, this is fine
+        // A default return value of 0 allows block positions with skylight to not be added (massively saves resources).
+        // Since all blocks with skylight are added to the queue at the start, this is fine.
         DiskBackedBucketedLong2IntHashMap distanceToSkylight = new DiskBackedBucketedLong2IntHashMap(buckets,
                 cacheBase, LightConnectedPathfinder::xzBucket, 0);
 
@@ -149,7 +147,7 @@ public class LightConnectedPathfinder {
         // Therefore, start checking at only blocks that have skylight since they will always
         // have some path to all blocks we are interested in adding to allLightConnected
         long lastTouchedChunk = new ChunkPos(Integer.MAX_VALUE, Integer.MAX_VALUE).toLong();
-        for (BlockPos blockPos : BlockPos.betweenClosed(segmentLow, segmentHigh)) {
+        for (BlockPos blockPos : BlockPosUtils.betweenClosedChunkOrder(segmentLow, segmentHigh)) {
             if (WorldExporterClient.canRequestChunks()) {
                 long thisChunk = ChunkPos.asLong(blockPos.getX() >> 4, blockPos.getZ() >> 4);
                 // "touch" the chunk to request and update its light data

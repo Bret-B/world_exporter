@@ -57,9 +57,6 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
         }
 
         if (diskBuckets.containsKey(bucketKey)) {
-//            long x = (bucketKey & 0xFFFFFFFF00000000L) >> 32;
-//            long z = bucketKey & 0x00000000FFFFFFFFL;
-//            WorldExporter.LOGGER.info("L: " + "x: " + x + ", z: " + z);
             // load the bucket from disk and move it to memory - not dirty yet
             try {
                 //noinspection unchecked
@@ -93,9 +90,6 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
     private void onMemoryRemove(long bucketKey, BucketValue bucket) {
         String pathToBucket = bucketPath(bucketKey).toString();
         diskBuckets.put(bucketKey, pathToBucket);
-//        long x = (bucketKey & 0xFFFFFFFF00000000L) >> 32;
-//        long z = bucketKey & 0x00000000FFFFFFFFL;
-//        WorldExporter.LOGGER.info("DUMPING " + "x: " + x + ", z: " + z);
 
         // skip the write if it hasn't changed
         if (dirty.contains(bucketKey)) {

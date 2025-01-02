@@ -415,6 +415,7 @@ public class Exporter {
             } else {
                 task.run();
             }
+            LOGGER.info("Full light connected set done building");
         }
 
         boolean threadSafe = threads == 1;
