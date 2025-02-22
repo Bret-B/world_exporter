@@ -19,6 +19,9 @@ public class DiskBackedVolumeSet implements SimpleSet<Long> {
     private static final int MAP_SIZE = Integer.MAX_VALUE;
     private static final long CHUNK_LAYER = 256;
     private final MappedByteBuffer[] maps;
+    private final Path[] paths;
+    private final RandomAccessFile[] randomAccessFiles;
+    private final FileChannel[] fileChannels;
     private final int lowX;
     private final int lowZ;
     private final int lowY;
@@ -53,12 +56,17 @@ public class DiskBackedVolumeSet implements SimpleSet<Long> {
         long numBytes = (blockVolume >> 3) + (blockVolume % 8 == 0 ? 0 : 1);
         int numMaps = (int) ((numBytes / MAP_SIZE) + (numBytes % MAP_SIZE == 0 ? 0 : 1));
         maps = new MappedByteBuffer[numMaps];
+        paths = new Path[numMaps];
+        randomAccessFiles = new RandomAccessFile[numMaps];
+        fileChannels = new FileChannel[numMaps];
         for (int i = 0; i < numMaps; ++i) {
-            Path file = Paths.get(baseCacheDir, SUBDIR, UUID.randomUUID().toString());
             try {
-                FileChannel fileChannel = new RandomAccessFile(file.toString(), "rw").getChannel();
+                Path file = Paths.get(baseCacheDir, SUBDIR, UUID.randomUUID().toString());
+                paths[i] = file;
+                randomAccessFiles[i] = new RandomAccessFile(file.toString(), "rw");
+                fileChannels[i] = randomAccessFiles[i].getChannel();
                 long mapSize = i == numMaps - 1 ? (numBytes % MAP_SIZE) : MAP_SIZE;
-                maps[i] = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, mapSize);
+                maps[i] = fileChannels[i].map(FileChannel.MapMode.READ_WRITE, 0, mapSize);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -157,5 +165,23 @@ public class DiskBackedVolumeSet implements SimpleSet<Long> {
     @Override
     public boolean remove(Long pos) {
         return remove(pos.longValue());
+    }
+
+    @Override
+    protected void finalize() throws Throwable {
+        try {
+            for (int i = 0; i < maps.length; ++i) {
+                try {
+                    ((DirectBuffer) maps[i]).cleaner().clean();
+                    fileChannels[i].close();
+                    randomAccessFiles[i].close();
+                    //noinspection ResultOfMethodCallIgnored
+                    paths[i].toFile().delete();
+                } catch (Throwable ignored) {
+                }
+            }
+        } finally {
+            super.finalize();
+        }
     }
 }

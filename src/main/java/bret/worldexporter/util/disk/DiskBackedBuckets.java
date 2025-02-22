@@ -1,6 +1,6 @@
 package bret.worldexporter.util.disk;
 
-import bret.worldexporter.WorldExporter;
+import bret.worldexporter.util.FileUtils;
 import bret.worldexporter.util.NotifyingLRUCache;
 import it.unimi.dsi.fastutil.io.BinIO;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -104,5 +104,14 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
 
     private Path bucketPath(long bucketKey) {
         return Paths.get(directory.toString(), String.valueOf(bucketKey));
+    }
+
+    @Override
+    protected void finalize() throws Throwable {
+        try {
+            FileUtils.deleteDirectoryRecursive(directory);
+        } finally {
+            super.finalize();
+        }
     }
 }
