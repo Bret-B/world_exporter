@@ -184,8 +184,7 @@ public class WorldExporterConfig {
 
             segmentedExteriorPathfinding = builder
                     .comment("Enable to perform segmented pathfinding for exterior visibility." +
-                            " This can be significantly faster since it can be done with multiple threads," +
-                            " and will also require less memory for large exports." +
+                            " This can sometimes be faster when using many threads and a low segmentChunkRadius." +
                             " It may reduce effectiveness for high values of maxVisibilityPathLength." +
                             " This setting only applies when exportVisibleExteriorOnly=true.")
                     .translation("worldexporter.config.client.segmentedExteriorPathfinding")
