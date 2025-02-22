@@ -138,6 +138,7 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
     protected void finalize() throws Throwable {
         try {
             FileUtils.deleteDirectoryRecursive(directory);
+        } catch (Throwable ignored) {
         } finally {
             super.finalize();
         }
