@@ -91,7 +91,6 @@ public class LightConnectedPathfinder {
             }
 
             VoxelShape posExitShape = stateAtPos.getFaceOcclusionShape(world, pos, dir);
-            BlockState stateAtCheck = world.getBlockState(toCheck);
             boolean lightExitsPosWithDir = !stateAtPos.canOcclude() ||
                     VoxelShapes.joinIsNotEmpty(
                             VoxelShapes.block(),
@@ -101,6 +100,7 @@ public class LightConnectedPathfinder {
                 continue;
             }
 
+            BlockState stateAtCheck = world.getBlockState(toCheck);
             boolean lightEntersCheck = !stateAtCheck.canOcclude() ||
                     VoxelShapes.joinIsNotEmpty(
                             VoxelShapes.block(),
@@ -133,7 +133,8 @@ public class LightConnectedPathfinder {
         SimpleSet<Long> allLightConnected = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
         SimpleSet<Long> seen = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
         SimpleSet<Long> inUnexplored = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
-        DiskBackedBucketedLongFIFOQueue unexplored = new DiskBackedBucketedLongFIFOQueue(4, 4096 * 4096, cacheBase);
+        DiskBackedBucketedLongFIFOQueue unexplored = new DiskBackedBucketedLongFIFOQueue(4,
+                4096 * buckets, cacheBase, true);
 
         // A default return value of 0 allows block positions with skylight to not be added (massively saves resources).
         // Since all blocks with skylight are added to the queue at the start, this is fine.
@@ -147,8 +148,9 @@ public class LightConnectedPathfinder {
         // Therefore, start checking at only blocks that have skylight since they will always
         // have some path to all blocks we are interested in adding to allLightConnected
         long lastTouchedChunk = new ChunkPos(Integer.MAX_VALUE, Integer.MAX_VALUE).toLong();
+        final boolean canRequestChunks = WorldExporterClient.canRequestChunks();
         for (BlockPos blockPos : BlockPosUtils.betweenClosedChunkOrder(segmentLow, segmentHigh)) {
-            if (WorldExporterClient.canRequestChunks()) {
+            if (canRequestChunks) {
                 long thisChunk = ChunkPos.asLong(blockPos.getX() >> 4, blockPos.getZ() >> 4);
                 // "touch" the chunk to request and update its light data
                 if (lastTouchedChunk != thisChunk) {

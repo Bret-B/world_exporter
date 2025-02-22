@@ -12,11 +12,12 @@ public class DiskBackedBucketedLongFIFOQueue {
     private long queueBucket = 0;
     private long dequeueBucket = 0;
 
-    public DiskBackedBucketedLongFIFOQueue(int bucketCacheSize, int sizePerBucket, String baseCacheDir) {
+    public DiskBackedBucketedLongFIFOQueue(int bucketCacheSize, int sizePerBucket, String baseCacheDir, boolean compressOnDisk) {
         buckets = new DiskBackedBuckets<>(
                 bucketCacheSize,
                 Paths.get(baseCacheDir, SUBDIR).toString(),
-                () -> new LongArrayFIFOQueue(sizePerBucket));
+                () -> new LongArrayFIFOQueue(sizePerBucket),
+                compressOnDisk);
         this.sizePerBucket = sizePerBucket;
     }
 
