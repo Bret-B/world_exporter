@@ -2,6 +2,7 @@ package bret.worldexporter.util;
 
 import bret.worldexporter.Exporter;
 import bret.worldexporter.WorldExporterClient;
+import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.util.disk.*;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import net.minecraft.block.BlockState;
@@ -134,7 +135,7 @@ public class LightConnectedPathfinder {
         SimpleSet<Long> seen = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
         SimpleSet<Long> inUnexplored = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
         DiskBackedBucketedLongFIFOQueue unexplored = new DiskBackedBucketedLongFIFOQueue(4,
-                4096 * buckets, cacheBase, true);
+                4096 * buckets, cacheBase, WorldExporterConfig.CLIENT.cacheCompressionType.get());
 
         // A default return value of 0 allows block positions with skylight to not be added (massively saves resources).
         // Since all blocks with skylight are added to the queue at the start, this is fine.

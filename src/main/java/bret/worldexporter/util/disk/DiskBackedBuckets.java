@@ -21,18 +21,18 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
     private final Long2ObjectOpenHashMap<String> diskBuckets = new Long2ObjectOpenHashMap<>();
     private final Supplier<BucketValue> bucketValueSupplier;
     private final Path directory;
-    private final boolean compressOnDisk;
+    private final CompressionType compressionType;
 
     public DiskBackedBuckets(int bucketCacheSize, String baseCacheDir, Supplier<BucketValue> bucketValueSupplier) {
-        this(bucketCacheSize, baseCacheDir, bucketValueSupplier, false);
+        this(bucketCacheSize, baseCacheDir, bucketValueSupplier, CompressionType.LZ4);
     }
 
-    public DiskBackedBuckets(int bucketCacheSize, String baseCacheDir, Supplier<BucketValue> bucketValueSupplier, boolean compressOnDisk) {
+    public DiskBackedBuckets(int bucketCacheSize, String baseCacheDir, Supplier<BucketValue> bucketValueSupplier, CompressionType compressionType) {
         final String cacheID = UUID.randomUUID().toString();
         memoryBuckets = new NotifyingLRUCache<>(bucketCacheSize, this::onMemoryRemove);
         directory = Paths.get(baseCacheDir, cacheID);
         this.bucketValueSupplier = bucketValueSupplier;
-        this.compressOnDisk = compressOnDisk;
+        this.compressionType = compressionType;
         try {
             Files.createDirectories(directory);
         } catch (IOException e) {
@@ -65,12 +65,19 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
         if (diskBuckets.containsKey(bucketKey)) {
             // load the bucket from disk and move it to memory - not dirty yet
             try {
-                if (compressOnDisk) {
-                    //noinspection unchecked
-                    result = (BucketValue) FileUtils.loadObjectDeflate(new File(bucketPath(bucketKey).toString()));
-                } else {
-                    //noinspection unchecked
-                    result = (BucketValue) BinIO.loadObject(new File(bucketPath(bucketKey).toString()));
+                switch (compressionType) {
+                    case DEFLATE:
+                        //noinspection unchecked
+                        result = (BucketValue) FileUtils.loadObjectDeflate(new File(bucketPath(bucketKey).toString()));
+                        break;
+                    case LZ4:
+                        //noinspection unchecked
+                        result = (BucketValue) FileUtils.loadObjectLZ4(new File(bucketPath(bucketKey).toString()));
+                        break;
+                    case NONE:
+                    default:
+                        //noinspection unchecked
+                        result = (BucketValue) BinIO.loadObject(new File(bucketPath(bucketKey).toString()));
                 }
             } catch (IOException | ClassNotFoundException | ClassCastException e) {
                 throw new RuntimeException(e);
@@ -105,10 +112,16 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
         // skip the write if it hasn't changed
         if (dirty.contains(bucketKey)) {
             try {
-                if (compressOnDisk) {
-                    FileUtils.storeObjectDeflate(bucket, new File(pathToBucket));
-                } else {
-                    BinIO.storeObject(bucket, new File(pathToBucket));
+                switch (compressionType) {
+                    case DEFLATE:
+                        FileUtils.storeObjectDeflate(bucket, new File(pathToBucket));
+                        break;
+                    case LZ4:
+                        FileUtils.storeObjectLZ4(bucket, new File(pathToBucket));
+                        break;
+                    case NONE:
+                    default:
+                        BinIO.storeObject(bucket, new File(pathToBucket));
                 }
             } catch (IOException e) {
                 throw new RuntimeException(e);

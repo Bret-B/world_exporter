@@ -1,5 +1,6 @@
 package bret.worldexporter.config;
 
+import bret.worldexporter.util.disk.CompressionType;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.ForgeConfigSpec.BooleanValue;
 import net.minecraftforge.common.ForgeConfigSpec.DoubleValue;
@@ -90,6 +91,7 @@ public class WorldExporterConfig {
         public final IntValue segmentChunkRadius;
         public final BooleanValue exportSides;
         public final BooleanValue requestPause;
+        public final EnumValue<CompressionType> cacheCompressionType;
 
         Client(final ForgeConfigSpec.Builder builder) {
             builder.comment("Client-only settings").push("client");
@@ -205,6 +207,13 @@ public class WorldExporterConfig {
                     .comment("Request to pause the server during exports, if the client has permission from the server.")
                     .translation("worldexporter.config.client.requestPause")
                     .define("requestPause", true);
+
+            cacheCompressionType = builder
+                    .comment("The compression type to use for intermediary cache files. " +
+                            "NONE is fastest, followed by LZ4, followed by DEFLATE. LZ4 is recommended, " +
+                            "but use DEFLATE if you are running into disk space limitations")
+                    .translation("worldexporter.config.client.cacheCompressionType")
+                    .defineEnum("cacheCompressionType", CompressionType.LZ4);
 
             builder.pop();
         }
