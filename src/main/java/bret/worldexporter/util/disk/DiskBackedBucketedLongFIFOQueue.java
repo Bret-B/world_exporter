@@ -9,7 +9,7 @@ public class DiskBackedBucketedLongFIFOQueue {
     private final DiskBackedBuckets<LongArrayFIFOQueue> buckets;
     private final int sizePerBucket;
     // bucket indices do not wrap and are technically finite
-    private long queueBucket = 0;
+    private long enqueueBucket = 0;
     private long dequeueBucket = 0;
 
     public DiskBackedBucketedLongFIFOQueue(int bucketCacheSize, int sizePerBucket, String baseCacheDir, CompressionType compressionType) {
@@ -22,26 +22,32 @@ public class DiskBackedBucketedLongFIFOQueue {
     }
 
     public void enqueue(long element) {
-        LongArrayFIFOQueue currentBucket = buckets.getBucket(queueBucket, true);
+        LongArrayFIFOQueue currentBucket = buckets.getBucket(enqueueBucket, true);
         if (currentBucket.size() >= sizePerBucket) {
-            currentBucket = buckets.getBucket(++queueBucket, true);
+            currentBucket = buckets.getBucket(++enqueueBucket, true);
         }
         currentBucket.enqueue(element);
-        buckets.setDirty(queueBucket);
+        buckets.setDirty(enqueueBucket);
     }
 
     public long dequeueLong() {
         LongArrayFIFOQueue bucket = buckets.getBucket(dequeueBucket);
         long result = bucket.dequeueLong();
         buckets.setDirty(dequeueBucket);
-        if (bucket.isEmpty()) {
+        // if we've exhausted this queue and the next one exists, use it for the next dequeue and delete the old queue
+        if (bucket.isEmpty() && buckets.bucketExists(dequeueBucket + 1)) {
             buckets.removeBucket(dequeueBucket++);
         }
         return result;
     }
 
     public boolean isEmpty() {
-        return buckets.isEmpty();
+        if (!buckets.bucketExists(dequeueBucket)) {
+            return true;  // bucket doesnt exist to dequeue from: empty
+        } else {
+            // check the bucket that would be dequeued from
+            return buckets.getBucket(dequeueBucket).isEmpty();
+        }
     }
 
     public void clear() {
