@@ -50,6 +50,10 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
         dirty.clear();
     }
 
+    public boolean bucketExists(long bucketKey) {
+        return memoryBuckets.containsKey(bucketKey) || diskBuckets.containsKey(bucketKey);
+    }
+
     public BucketValue getBucket(long bucketKey) {
         return getBucket(bucketKey, false);
     }
@@ -95,8 +99,14 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
     }
 
     public void removeBucket(long bucketKey) {
-        memoryBuckets.remove(bucketKey);
+        if (diskBuckets.containsKey(bucketKey)) {
+            try {
+                Files.delete(bucketPath(bucketKey));
+            } catch (IOException ignored) {
+            }
+        }
         diskBuckets.remove(bucketKey);
+        memoryBuckets.remove(bucketKey);
         dirty.remove(bucketKey);
     }
 
