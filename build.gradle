@@ -15,6 +15,11 @@ buildscript {
         classpath group: 'org.spongepowered', name: 'mixingradle', version: '0.7-SNAPSHOT'
     }
 }
+
+plugins {
+    id 'com.github.johnrengelman.shadow' version '7.1.2'  // com.gradleup.shadow does not have gradle 7 versions
+}
+
 apply plugin: 'net.minecraftforge.gradle'
 // Only edit below this line, the above code adds and enables the necessary things for Forge to be setup.
 apply plugin: 'org.parchmentmc.librarian.forgegradle'
@@ -29,8 +34,6 @@ group = 'bret.worldexporter' // http://maven.apache.org/guides/mini/guide-naming
 archivesBaseName = "worldexporter-${mcversion}"
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(8) // Mojang ships Java 8 to end users, so your mod should target Java 8.
-
-jarJar.enable()  // Enables inclusion of dependency jars in the worldexporter jar
 
 println('Java: ' + System.getProperty('java.version') + ' JVM: ' + System.getProperty('java.vm.version') + '(' + System.getProperty('java.vendor') + ') Arch: ' + System.getProperty('os.arch'))
 minecraft {
@@ -148,6 +151,11 @@ repositories {
     }
 }
 
+configurations {
+    shade
+    implementation.extendsFrom shade
+}
+
 dependencies {
     // Specify the version of Minecraft to use, If this is any group other then 'net.minecraft' it is assumed
     // that the dep is a ForgeGradle 'patcher' dependency. And it's patches will be applied.
@@ -160,9 +168,7 @@ dependencies {
     // compile "some.group:artifact:version:classifier"
     // compile "some.group:artifact:version"
 
-    implementation(group: 'org.lz4', name: 'lz4-java', version: '[1.4,2.0)') {
-        jarJar.pin(it, '1.8.0')
-    }
+    shade(group: 'org.lz4', name: 'lz4-java', version: '1.8.0')
 
     // for running the dev environment with other mods
     // runtimeOnly fg.deobf("mezz.jei:jei-1.16.5:7.7.1.153")
@@ -221,6 +227,7 @@ mixin {
 
 // Example for how to get properties into the manifest for reading by the runtime..
 jar {
+    archiveClassifier = 'slim'
     manifest {
         attributes([
             "Specification-Title": "worldexporter",
@@ -232,6 +239,19 @@ jar {
             "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
         ])
     }
+}
+
+shadowJar {
+    archiveClassifier = ''
+    configurations = [project.configurations.shade]
+    relocate 'net.jpountz', "${project.group}.relocated.net.jpountz"
+    finalizedBy 'reobfShadowJar'
+}
+
+assemble.dependsOn shadowJar
+
+reobf {
+    shadowJar {}
 }
 
 // Example configuration to allow publishing using the maven-publish task
