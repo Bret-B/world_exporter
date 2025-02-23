@@ -45,9 +45,12 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
     }
 
     public void clear() {
-        memoryBuckets.clear();
-        diskBuckets.clear();
-        dirty.clear();
+        for (long key : diskBuckets.keySet()) {
+            removeBucket(key);
+        }
+        for (long key : memoryBuckets.keySet()) {
+            removeBucket(key);
+        }
     }
 
     public boolean bucketExists(long bucketKey) {
