@@ -99,14 +99,15 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
     }
 
     public void removeBucket(long bucketKey) {
-        if (diskBuckets.containsKey(bucketKey)) {
+        boolean removedDisk = diskBuckets.remove(bucketKey) != null;
+        boolean removedMem = memoryBuckets.remove(bucketKey) != null;
+        if (removedDisk || removedMem) {
+            // if the bucket was only ever in RAM and never written to disk, this will be ignored
             try {
                 Files.delete(bucketPath(bucketKey));
             } catch (IOException ignored) {
             }
         }
-        diskBuckets.remove(bucketKey);
-        memoryBuckets.remove(bucketKey);
         dirty.remove(bucketKey);
     }
 
