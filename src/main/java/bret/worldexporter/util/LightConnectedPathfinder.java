@@ -160,7 +160,7 @@ public class LightConnectedPathfinder {
                 }
             }
 
-            if (hasSkyLight(blockPos)) {
+            if (hasSkyLight(blockPos) || blockPos.getY() >= Exporter.WORLD_HEIGHT_LIMIT) {
                 long pos = blockPos.asLong();
                 unexplored.enqueue(pos);
                 inUnexplored.add(pos);
