@@ -17,6 +17,7 @@ import net.minecraftforge.fml.common.Mod;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.Objects;
 import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.CyclicBarrier;
@@ -42,6 +43,10 @@ public class WorldExporterClient {
 
     public static File getExportDirectory() {
         return baseDir;
+    }
+
+    public static String getCacheDirectory() {
+        return Paths.get(getExportDirectory().getPath(), "cache").toString();
     }
 
     public static boolean isClientExporting() {

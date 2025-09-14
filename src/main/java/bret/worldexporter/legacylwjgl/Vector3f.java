@@ -31,6 +31,7 @@
  */
 package bret.worldexporter.legacylwjgl;
 
+import java.io.Serializable;
 import java.nio.FloatBuffer;
 import java.util.Objects;
 
@@ -42,7 +43,7 @@ import java.util.Objects;
  * $Id$
  */
 
-public class Vector3f extends Vector {
+public class Vector3f extends Vector implements Serializable {
 
     private static final long serialVersionUID = 1L;
 

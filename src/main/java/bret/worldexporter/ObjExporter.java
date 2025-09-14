@@ -7,7 +7,8 @@ import bret.worldexporter.util.ImgUtils;
 import bret.worldexporter.util.LABPBRParser;
 import bret.worldexporter.util.LRUCache;
 import bret.worldexporter.util.OptifineReflector;
-import net.minecraft.client.Minecraft;
+import bret.worldexporter.util.disk.BucketFunctions;
+import bret.worldexporter.util.disk.DiskBackedBucketedObject2IntHashMap;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.util.ResourceLocation;
 import org.apache.commons.lang3.tuple.Pair;
@@ -30,9 +31,13 @@ public class ObjExporter extends Exporter {
     private final File baseDir = WorldExporterClient.getExportDirectory();
     private final File texturePath = new File(baseDir, TEXTURE_DIR);
     // geometric vertices cache (tag v) for the .obj output which maps the vertex to its number in the file
-    private final Map<Vector3f, Integer> verticesCache = new LRUCache<>(40000);
+    private final DiskBackedBucketedObject2IntHashMap<Vector3f> verticesCache = new DiskBackedBucketedObject2IntHashMap<>(
+            32,
+            WorldExporterClient.getCacheDirectory(),
+            ObjExporter::verticesBucket
+    );
     // uv texture coordinates cache (tag vt) for the .obj output which maps the uv value to its number in the file
-    private final Map<Vector2f, Integer> uvCache = new LRUCache<>(20000);
+    private final Map<Vector2f, Integer> uvCache = new LRUCache<>(500_000);
     private final int[] vertUVIndices = new int[8];
     private final Map<Triple<ResourceLocation, Integer, Integer>, Integer> modelToIdMap = new HashMap<>();
     private final Map<Pair<Integer, Integer>, Integer> colorLightToIdMap = new HashMap<>();
@@ -457,5 +462,9 @@ public class ObjExporter extends Exporter {
 
     private void writeTextureOnThread(File outputFile, BufferedImage image) {
         addThreadTask(() -> writeTexture(outputFile, image));
+    }
+
+    private static long verticesBucket(Vector3f vec) {
+        return BucketFunctions.xzLocalityBucket((int) vec.getX(), (int) vec.getZ(), 16);
     }
 }

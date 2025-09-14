@@ -16,7 +16,6 @@ import net.minecraft.util.math.shapes.VoxelShapes;
 import net.minecraft.world.LightType;
 import org.apache.commons.lang3.tuple.Pair;
 
-import java.nio.file.Paths;
 import java.util.Collection;
 
 public class LightConnectedPathfinder {
@@ -130,7 +129,7 @@ public class LightConnectedPathfinder {
         // Note: to have blocks have 0 cost for light transfer instead of 1, it would be sufficient to
         //  use two queues and always remove from queue 1 first if possible instead of using a priority queue structure
         int buckets = isFullRange ? 4096 : 64;
-        String cacheBase = Paths.get(WorldExporterClient.getExportDirectory().getPath(), "cache").toString();
+        String cacheBase = WorldExporterClient.getCacheDirectory();
         SimpleSet<Long> allLightConnected = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
         SimpleSet<Long> seen = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
         SimpleSet<Long> inUnexplored = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
