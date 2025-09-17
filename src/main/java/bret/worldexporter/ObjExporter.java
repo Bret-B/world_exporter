@@ -17,6 +17,7 @@ import org.apache.commons.lang3.tuple.Triple;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -407,26 +408,43 @@ public class ObjExporter extends Exporter {
         // loop through the quad vertices, calculating the .obj file index for position and uv coordinates
         for (int i = 0; i < 4; ++i) {
             Vertex vertex = quad.getVertices()[i];
-            Vector3f position = vertex.getPosition();
+            BigDecimal x = MeshOptimizer.roundFloatToBigDecimal(vertex.getPosition().getX(), 4);
+            BigDecimal y = MeshOptimizer.roundFloatToBigDecimal(vertex.getPosition().getY(), 4);
+            BigDecimal z = MeshOptimizer.roundFloatToBigDecimal(vertex.getPosition().getZ(), 4);
+            Vector3f position = new Vector3f(
+                    x == null ? Float.NaN : x.floatValue(),
+                    y == null ? Float.NaN : y.floatValue(),
+                    z == null ? Float.NaN : z.floatValue()
+            );
             int vertIndex;
             if (verticesCache.containsKey(position)) {
                 vertIndex = verticesCache.get(position);
             } else {
                 vertIndex = ++vertCount;
                 verticesCache.put(position, vertIndex);
-                result.append("v ").append(position.x).append(' ').append(position.y).append(' ').append(position.z).append('\n');
+                result.append("v ")
+                        .append(x == null ? Float.NaN : x.stripTrailingZeros().toPlainString()).append(' ')
+                        .append(y == null ? Float.NaN : y.stripTrailingZeros().toPlainString()).append(' ')
+                        .append(z == null ? Float.NaN : z.stripTrailingZeros().toPlainString()).append('\n');
             }
             vertUVIndices[i] = vertIndex;
 
             if (hasUV) {
-                Vector2f uv = vertex.getUv();
+                BigDecimal u = MeshOptimizer.roundFloatToBigDecimal(vertex.getUv().getX(), 4);
+                BigDecimal v = MeshOptimizer.roundFloatToBigDecimal(vertex.getUv().getY(), 4);
+                Vector2f uv = new Vector2f(
+                        u == null ? Float.NaN : u.floatValue(),
+                        v == null ? Float.NaN : v.floatValue()
+                );
                 int uvIndex;
                 if (uvCache.containsKey(uv)) {
                     uvIndex = uvCache.get(uv);
                 } else {
                     uvIndex = ++uvCount;
                     uvCache.put(uv, uvIndex);
-                    result.append("vt ").append(uv.x).append(' ').append(uv.y).append('\n');
+                    result.append("vt ")
+                            .append(u == null ? Float.NaN : u.stripTrailingZeros().toPlainString()).append(' ')
+                            .append(v == null ? Float.NaN : v.stripTrailingZeros().toPlainString()).append('\n');
                 }
                 vertUVIndices[i + 4] = uvIndex;
             }
