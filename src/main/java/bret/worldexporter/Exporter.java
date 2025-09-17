@@ -28,12 +28,15 @@ import java.awt.image.BufferedImage;
 import java.awt.image.RasterFormatException;
 import java.lang.reflect.Field;
 import java.nio.IntBuffer;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static bret.worldexporter.WorldExporter.LOGGER;
+import static bret.worldexporter.util.FileUtils.deleteDirectoryRecursive;
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
 public class Exporter {
@@ -273,13 +276,15 @@ public class Exporter {
         // setPause(true);
     }
 
-    // required to reset MC options related rendering
+    // required to reset MC options related to rendering
     public void finish() {
         mc.options.ambientOcclusion = preAO;
         mc.options.entityShadows = preShadows;
 
         // resume the IntegratedServer, if there is one
         // setPause(false);
+        Path cacheDir = Paths.get(WorldExporterClient.getCacheDirectory());
+        deleteDirectoryRecursive(cacheDir);
     }
 
     public boolean isOnExportEdge(BlockPos pos) {

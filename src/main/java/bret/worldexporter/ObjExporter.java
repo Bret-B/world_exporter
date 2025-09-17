@@ -90,6 +90,8 @@ public class ObjExporter extends Exporter {
             }
         }
 
+        uvCache.clear();
+        verticesCache.clear();
         finish();
         return success;
     }
