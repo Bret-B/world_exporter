@@ -52,9 +52,7 @@ public class WorldExporterConfig {
             builder.comment("Server-only settings").push("server");
 
             pauseEnabled = builder
-                    .comment("Set this to true to allow users with permissions to pause the server during an export" +
-                            " See the sever configuration file (server.properties)" +
-                            " under op-permission-level for the level given to server ops. Default: 4")
+                    .comment("Set this to true to allow users with permissions to pause the server during an export. Default: true")
                     .translation("worldexporter.config.server.pauseEnabled")
                     .define("pauseEnabled", true);
 
