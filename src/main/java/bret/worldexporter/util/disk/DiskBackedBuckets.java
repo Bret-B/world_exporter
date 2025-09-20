@@ -45,10 +45,10 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
     }
 
     public void clear() {
-        for (long key : diskBuckets.keySet()) {
+        for (long key : diskBuckets.keySet().toLongArray()) {
             removeBucket(key);
         }
-        for (long key : memoryBuckets.keySet()) {
+        for (long key : memoryBuckets.keySet().toArray(new Long[0])) {
             removeBucket(key);
         }
     }
