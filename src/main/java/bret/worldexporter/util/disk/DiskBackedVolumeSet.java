@@ -14,10 +14,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.UUID;
 
+import static bret.worldexporter.Exporter.WORLD_HEIGHT_LIMIT;
+
 public class DiskBackedVolumeSet implements SimpleSet<Long> {
-    private static final String SUBDIR = "volumeset";
+    private static final String SUBDIR = "volumebitset";
     private static final int MAP_SIZE = Integer.MAX_VALUE;
-    private static final long CHUNK_LAYER = 256;
+    private static final long CHUNK_LAYER = WORLD_HEIGHT_LIMIT + 1;
     private final MappedByteBuffer[] maps;
     private final Path[] paths;
     private final RandomAccessFile[] randomAccessFiles;

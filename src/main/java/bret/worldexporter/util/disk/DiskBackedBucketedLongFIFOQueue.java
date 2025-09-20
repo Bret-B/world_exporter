@@ -5,7 +5,7 @@ import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import java.nio.file.Paths;
 
 public class DiskBackedBucketedLongFIFOQueue {
-    private static final String SUBDIR = "queue";
+    private static final String SUBDIR = "longqueue";
     private final DiskBackedBuckets<LongArrayFIFOQueue> buckets;
     private final int sizePerBucket;
     // bucket indices do not wrap and are technically finite

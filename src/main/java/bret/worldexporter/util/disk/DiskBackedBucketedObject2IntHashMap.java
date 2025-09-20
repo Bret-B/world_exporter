@@ -7,7 +7,7 @@ import java.nio.file.Paths;
 import java.util.function.Function;
 
 public class DiskBackedBucketedObject2IntHashMap<T extends Serializable> {
-    private static final String SUBDIR = "objectmap";
+    private static final String SUBDIR = "object2intmap";
     private final DiskBackedBuckets<Object2IntOpenHashMap<T>> buckets;
     private final Function<T, Long> bucketFunction;
 
