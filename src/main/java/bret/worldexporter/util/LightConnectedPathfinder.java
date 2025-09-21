@@ -134,7 +134,7 @@ public class LightConnectedPathfinder {
         SimpleSet<Long> seen = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
         SimpleSet<Long> inUnexplored = new DiskBackedVolumeSet(cacheBase, segmentLow, segmentHigh);
         DiskBackedBucketedLongFIFOQueue unexplored = new DiskBackedBucketedLongFIFOQueue(4,
-                4096 * buckets, cacheBase, WorldExporterConfig.CLIENT.cacheCompressionType.get());
+                4096 * buckets, cacheBase);
 
         // A default return value of 0 allows block positions with skylight to not be added (massively saves resources).
         // Since all blocks with skylight are added to the queue at the start, this is fine.

@@ -454,7 +454,7 @@ public class Exporter {
         while (!exporterThreadPool.isTerminated()) {
             try {
                 // poll here in time increments waiting for tasks; recheck if threads are done on timeout
-                Runnable task = mainThreadTasks.poll(50, TimeUnit.MILLISECONDS);
+                Runnable task = mainThreadTasks.poll(1, TimeUnit.MILLISECONDS);
                 if (task != null) {
                     task.run();
                 } else {

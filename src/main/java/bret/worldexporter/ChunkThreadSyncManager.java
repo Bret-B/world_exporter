@@ -106,18 +106,14 @@ public class ChunkThreadSyncManager {
 
         if (allReceived) {
             // WorldExporter.LOGGER.info(String.format("Chunk all received: x:%d, z:%d", x, z));
-            requestsDisabled.set(true);
             // how accurate is the data if it cannot request true data from nearby chunks?
             Objects.requireNonNull(Minecraft.getInstance().level).getChunkSource()
                     .getLightEngine().runUpdates(Integer.MAX_VALUE, true, true);
-            requestsDisabled.set(false);
             AtomicBoolean chunkReceived = getChunkEvent(x, z);
-            chunkReceived.set(true);
+            chunkPartsReceived.remove(pos);
+            chunkEvents.remove(pos);
             pendingChunks.remove(pos);
-            //noinspection SynchronizationOnLocalVariableOrMethodParameter
-            synchronized (chunkReceived) {
-                chunkReceived.notifyAll();
-            }
+            chunkReceived.set(true);
         }
     }
 
@@ -147,7 +143,6 @@ public class ChunkThreadSyncManager {
         }
     }
     // --------------------------------------------------------------------------------------------
-
 
     public static void waitForThreadsReady() {
         while (!threadsShouldResume.get()) {
@@ -181,10 +176,15 @@ public class ChunkThreadSyncManager {
     }
 
     public static void completeAllTasks() {
+        // disable requests so that main thread tasks don't cause a deadlock
+        // e.g., handling chunk packet which asks to update nearby blocks which requests another chunk, etc.
+        boolean preDisabled = requestsDisabled();
+        requestsDisabled.set(true);
         while (!threadSyncRequiredTasks.isEmpty()) {
             Runnable task = threadSyncRequiredTasks.poll();
             if (task != null) task.run();
         }
+        requestsDisabled.set(preDisabled);
     }
 
     public static void mainThreadEventLoop(BooleanSupplier hasFinished, @Nullable Queue<Runnable> secondaryQueue, boolean returnIfCannotSync) {
