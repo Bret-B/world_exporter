@@ -3,6 +3,7 @@ package bret.worldexporter.mixins;
 import bret.worldexporter.ChunkThreadSyncManager;
 import bret.worldexporter.WorldExporterClient;
 import bret.worldexporter.mixinsadditional.IMixinChunkArrayAccessor;
+import bret.worldexporter.util.NotifyingLRUCache;
 import bret.worldexporter.util.Pairing;
 import net.minecraft.client.multiplayer.ClientChunkProvider;
 import net.minecraft.client.world.ClientWorld;
@@ -26,8 +27,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import javax.annotation.Nullable;
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 // TODO: start forgetting chunks from additional storage based on reference counting?
@@ -159,20 +162,34 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         private final Map<Integer, Chunk> worldexporter$additionalStorage = new ConcurrentHashMap<>();
         @Unique
         // this is required because the standard ChunkArray calls work with integer keys
-        private final Map<Long, Integer> worldexporter$pairToNegativeKey = new ConcurrentHashMap<>();
+        private final Map<Long, Integer> worldexporter$pairToNegativeKey = Collections.synchronizedMap(
+                new NotifyingLRUCache<>(4096, this::worldexporter$onForgetPairKey));
         @Unique
         private final AtomicInteger worldexporter$negativeCount = new AtomicInteger(0);
-        // TODO add a set of previous negative keys to be reused when chunks are deleted, so there is
-        //  no potential to underflow
+        @Unique
+        private final ConcurrentLinkedQueue<Integer> worldexporter$reusableIndices = new ConcurrentLinkedQueue<>();
         @Shadow
         @Final
         ClientChunkProvider this$0;
 
+        @Unique
+        public void worldexporter$onForgetPairKey(long pair, int negativeKey) {
+            Chunk removed = worldexporter$additionalStorage.remove(negativeKey);
+            this$0.level.unload(removed);
+            worldexporter$reusableIndices.add(negativeKey);
+        }
+
         @Override
         public int worldexporter$createChunkIndex(int pX, int pZ) {
-            // TODO pull from list of reused negative int keys
+            int intKey;
+            Integer boxedIntKey = worldexporter$reusableIndices.poll();
+            if (boxedIntKey == null) {
+                intKey = worldexporter$negativeCount.decrementAndGet();
+            } else {
+                intKey = boxedIntKey;
+            }
+
             long pairKey = Pairing.fromPair(pX, pZ);
-            int intKey = worldexporter$negativeCount.decrementAndGet();
             worldexporter$pairToNegativeKey.put(pairKey, intKey);
             return intKey;
         }
@@ -191,9 +208,9 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
 
         @Override
         public void worldexporter$removeChunkCustom(int index) {
-            // TODO add to reused negative int key list
             this$0.level.unload(worldexporter$additionalStorage.get(index));
             worldexporter$additionalStorage.remove(index);
+            worldexporter$reusableIndices.add(index);
         }
 
         @Override
