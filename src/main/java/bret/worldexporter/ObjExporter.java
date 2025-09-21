@@ -82,7 +82,7 @@ public class ObjExporter extends Exporter {
                     }
                 }
             };
-            exportQuads(chunkConsumer);
+            runExport(chunkConsumer);
         } catch (IOException | InterruptedException e) {
             success = false;
         } finally {

@@ -20,7 +20,6 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
-import static bret.worldexporter.WorldExporter.LOGGER;
 import static bret.worldexporter.networking.packets.PacketUtil.packetAsBytes;
 
 @SuppressWarnings("BusyWait")
@@ -221,34 +220,64 @@ public class ChunkThreadSyncManager {
         }
     }
 
+    public static void noSyncRequiredMainThreadEventLoop(BooleanSupplier hasFinished, @Nullable Queue<Runnable> secondaryQueue) {
+        if (!isMainThread()) {
+            throw new RuntimeException("mainThreadEventLoop() must be ran on the main thread!");
+        }
+
+        while (!hasFinished.getAsBoolean()) {
+            try {
+                Thread.sleep(1);
+            } catch (InterruptedException ignored) {
+            }
+
+            completeAllTasks();
+
+            while (secondaryQueue != null && !secondaryQueue.isEmpty()) {
+                Runnable task = secondaryQueue.poll();
+                if (task != null) task.run();
+            }
+        }
+    }
+
     public static boolean isPending(int x, int z) {
         return pendingChunks.contains(ChunkPos.asLong(x, z));
     }
 
-    // Blocks until the desired chunk can be returned. Usable on or off the main thread
+    public static boolean hasPending() {
+        return !pendingChunks.isEmpty();
+    }
+
     public static void requestChunk(int pChunkX, int pChunkZ) {
+//        WorldExporter.LOGGER.info(String.format("Req chunk: x:%d\tz:%d", pChunkX, pChunkZ));
         long pos = ChunkPos.asLong(pChunkX, pChunkZ);
         boolean isNewlyPending = pendingChunks.add(pos);
-        boolean requestFromServer = false;
-        if (isNewlyPending) {
-            // avoid request to server again if we have the chunk in the cache
-            // since the chunk wasn't pending before, it means that if we have it in the cache then both parts should exist
-            //noinspection SynchronizeOnNonFinalField
-            synchronized (chunkDataPacketCache) {
-                if (chunkDataPacketCache.containsKey(pos)) {
-//                    LOGGER.info(String.format("Load chunk packets from disk:\tx:%d\tz:%d", pChunkX, pChunkZ));
-                    SChunkDataPacketCustom.handle(SChunkDataPacketCustom.fromBytes(chunkDataPacketCache.get(pos)), false);
-                    SUpdateLightPacketCustom.handle(SUpdateLightPacketCustom.fromBytes(lightDataPacketCache.get(pos)), false);
-                } else {
-                    requestFromServer = true;
-                }
-            }
+        if (!isNewlyPending) {
+            return;
+        }
 
-            if (requestFromServer) {
-//                WorldExporter.LOGGER.info(String.format("Req chunk: x:%d\tz:%d", pChunkX, pChunkZ));
-                PacketHandler.INSTANCE.sendToServer(new CRequestChunkPacket(pChunkX, pChunkZ));
+        boolean requestFromServer = false;
+        // avoid request to server again if we have the chunk in the cache
+        // since the chunk wasn't pending before, it means that if we have it in the cache then both parts should exist
+        //noinspection SynchronizeOnNonFinalField
+        synchronized (chunkDataPacketCache) {
+            if (chunkDataPacketCache.containsKey(pos)) {
+//                    LOGGER.info(String.format("Load chunk packets from disk:\tx:%d\tz:%d", pChunkX, pChunkZ));
+                SChunkDataPacketCustom.handle(SChunkDataPacketCustom.fromBytes(chunkDataPacketCache.get(pos)), false);
+                SUpdateLightPacketCustom.handle(SUpdateLightPacketCustom.fromBytes(lightDataPacketCache.get(pos)), false);
+            } else {
+                requestFromServer = true;
             }
         }
+
+        if (requestFromServer) {
+            PacketHandler.INSTANCE.sendToServer(new CRequestChunkPacket(pChunkX, pChunkZ));
+        }
+    }
+
+    // Blocks until the desired chunk can be returned. Usable on or off the main thread
+    public static void requestChunkAndWait(int pChunkX, int pChunkZ) {
+        requestChunk(pChunkX, pChunkZ);
 
         if (ChunkThreadSyncManager.isMainThread()) {
             ChunkThreadSyncManager.mainThreadEventLoop(

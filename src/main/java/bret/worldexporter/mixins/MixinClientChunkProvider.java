@@ -33,7 +33,6 @@ import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-// TODO: start forgetting chunks from additional storage based on reference counting?
 @Mixin(ClientChunkProvider.class)
 public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
     @Shadow
@@ -59,7 +58,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
             // request the chunk from the server (if not already done) and block appropriately until it has been added
             // then, fallthrough to the regular code which should properly return the chunk
             // WorldExporter.LOGGER.info(String.format("Client requesting chunk from server: x:%d z:%d", pChunkX, pChunkZ));
-            ChunkThreadSyncManager.requestChunk(pChunkX, pChunkZ);
+            ChunkThreadSyncManager.requestChunkAndWait(pChunkX, pChunkZ);
         }
         // fallthrough
 //        if (this.storage.inRange(pChunkX, pChunkZ)) {

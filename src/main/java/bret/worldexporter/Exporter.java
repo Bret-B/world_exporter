@@ -17,6 +17,7 @@ import net.minecraft.util.Direction;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.Timer;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.chunk.Chunk;
 import org.apache.commons.lang3.tuple.Pair;
 import org.lwjgl.BufferUtils;
@@ -32,6 +33,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -307,6 +310,30 @@ public class Exporter {
         return isOnExportEdge(pos) ? 0 : (inExportRange(pos) ? 1 : -1);
     }
 
+    private void preTouchChunks() {
+        AtomicBoolean done = new AtomicBoolean(false);
+        Runnable task = () -> {
+            AtomicInteger i = new AtomicInteger(1);
+            ChunkPos.rangeClosed(new ChunkPos(lowPos), new ChunkPos(highPos)).forEach(chunkPos -> {
+                // hasChunk calls getChunk under the hood, and I'm not sure about obeying pLoad in the provider mixin
+                if (!world.getChunkSource().storage.inRange(chunkPos.x, chunkPos.z)) {
+                    ChunkThreadSyncManager.requestChunk(chunkPos.x, chunkPos.z);
+                }
+                // Pause and give the main thread a chance to catch up every once in a while
+                if (i.incrementAndGet() % 100 == 0) {
+                    i.set(1);
+                    //noinspection StatementWithEmptyBody
+                    while (ChunkThreadSyncManager.hasPending()) {}
+                }
+            });
+            done.set(true);
+        };
+        (new Thread(task)).start();
+
+        // Some packets will probably come back and hit the task queue after, but that shouldn't cause problems
+        ChunkThreadSyncManager.noSyncRequiredMainThreadEventLoop(done::get, mainThreadTasks);
+    }
+
     // attempts to shrink the actual export radius to include only chunks that are loaded
     // (only in the NESW directions, never vertically)
     private void shrinkStartEndPosBBOXCardinal() {
@@ -400,9 +427,14 @@ public class Exporter {
     }
 
     // this function MUST be run on the main thread
-    public void exportQuads(Consumer<ArrayList<ExportChunk>> chunkConsumer) throws InterruptedException {
-        // shrink the initially supplied region to include only loaded chunks, if chunks cannot be requested from server
-        if (!WorldExporterClient.canRequestChunks()) {
+    public void runExport(Consumer<ArrayList<ExportChunk>> chunkConsumer) throws InterruptedException {
+        if (WorldExporterClient.canRequestChunks()) {
+            // improve export speed by caching all the chunks we'll need beforehand
+            LOGGER.info("Caching chunks from server before beginning export");
+            preTouchChunks();
+            LOGGER.info("Done caching chunks");
+        } else {
+            // shrink the initially supplied region to include only loaded chunks since chunks cannot be requested from server
             shrinkStartEndPosBBOXCardinal();
         }
 
@@ -474,6 +506,10 @@ public class Exporter {
         threadPool.shutdown();
         //noinspection ResultOfMethodCallIgnored
         threadPool.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+
+        if (lightConnected.get() != null) {
+            lightConnected.get().dispose();
+        }
     }
 
     // Returns the facing directions that should be forcibly enabled (at the edge of the export) for a given BlockPos
