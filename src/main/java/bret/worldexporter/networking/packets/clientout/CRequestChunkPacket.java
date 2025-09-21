@@ -1,5 +1,6 @@
 package bret.worldexporter.networking.packets.clientout;
 
+import bret.worldexporter.WorldExporter;
 import bret.worldexporter.WorldExporterServer;
 import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.networking.packets.PacketHandler;
@@ -51,6 +52,9 @@ public class CRequestChunkPacket {
                 // WorldExporter.LOGGER.info(String.format("Processing chunk request x:%d, z:%d on server thread and returning data packets", packet.chunkX, packet.chunkZ));
                 // Will generate or load the chunk from disk as necessary
                 Chunk toSend = sender.level.getChunk(packet.chunkX, packet.chunkZ);
+                if (toSend.isEmpty()) {
+                     WorldExporter.LOGGER.info(String.format("SERVER chunk x:%d, z:%d empty", packet.chunkX, packet.chunkZ));
+                }
 
                 PacketHandler.sendToPlayer(sender, new SUpdateLightPacketCustom(new ChunkPos(packet.chunkX, packet.chunkZ), sender.level.getChunkSource().getLightEngine(), true));
                 PacketHandler.sendToPlayer(sender, new SChunkDataPacketCustom(toSend, 65535));

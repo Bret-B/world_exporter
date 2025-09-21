@@ -230,14 +230,13 @@ public class ChunkThreadSyncManager {
         long pos = ChunkPos.asLong(pChunkX, pChunkZ);
         boolean isNewlyPending = pendingChunks.add(pos);
         boolean requestFromServer = false;
-        long bench = System.currentTimeMillis();
         if (isNewlyPending) {
             // avoid request to server again if we have the chunk in the cache
             // since the chunk wasn't pending before, it means that if we have it in the cache then both parts should exist
             //noinspection SynchronizeOnNonFinalField
             synchronized (chunkDataPacketCache) {
                 if (chunkDataPacketCache.containsKey(pos)) {
-                    LOGGER.info(String.format("Load chunk packets from disk:\tx:%d\tz:%d", pChunkX, pChunkZ));
+//                    LOGGER.info(String.format("Load chunk packets from disk:\tx:%d\tz:%d", pChunkX, pChunkZ));
                     SChunkDataPacketCustom.handle(SChunkDataPacketCustom.fromBytes(chunkDataPacketCache.get(pos)), false);
                     SUpdateLightPacketCustom.handle(SUpdateLightPacketCustom.fromBytes(lightDataPacketCache.get(pos)), false);
                 } else {
@@ -246,9 +245,8 @@ public class ChunkThreadSyncManager {
             }
 
             if (requestFromServer) {
-                WorldExporter.LOGGER.info(String.format("Req chunk: x:%d\tz:%d", pChunkX, pChunkZ));
+//                WorldExporter.LOGGER.info(String.format("Req chunk: x:%d\tz:%d", pChunkX, pChunkZ));
                 PacketHandler.INSTANCE.sendToServer(new CRequestChunkPacket(pChunkX, pChunkZ));
-                bench = System.currentTimeMillis();
             }
         }
 
@@ -259,10 +257,6 @@ public class ChunkThreadSyncManager {
                     false);
         } else {
             ChunkThreadSyncManager.blockUntilChunk(pChunkX, pChunkZ);
-        }
-
-        if (requestFromServer) {
-            LOGGER.info("Took " + (System.currentTimeMillis() - bench) + " ms for server chunk");
         }
     }
 
