@@ -3,6 +3,10 @@ package bret.worldexporter;
 import bret.worldexporter.networking.packets.PacketHandler;
 import bret.worldexporter.networking.packets.ReceivedChunkEnum;
 import bret.worldexporter.networking.packets.clientout.CRequestChunkPacket;
+import bret.worldexporter.networking.packets.serverout.SChunkDataPacketCustom;
+import bret.worldexporter.networking.packets.serverout.SUpdateLightPacketCustom;
+import bret.worldexporter.util.disk.BucketFunctions;
+import bret.worldexporter.util.disk.DiskBackedBucketedLong2ObjectHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.util.math.ChunkPos;
@@ -16,6 +20,8 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
+import static bret.worldexporter.WorldExporter.LOGGER;
+
 @SuppressWarnings("BusyWait")
 public class ChunkThreadSyncManager {
     private final static LinkedBlockingQueue<Runnable> threadSyncRequiredTasks = new LinkedBlockingQueue<>();
@@ -26,7 +32,10 @@ public class ChunkThreadSyncManager {
     private final static ConcurrentHashMap.KeySetView<Long, Boolean> pendingChunks = ConcurrentHashMap.newKeySet();
     private final static Long2ObjectOpenHashMap<boolean[]> chunkPartsReceived = new Long2ObjectOpenHashMap<>();
     private final static ConcurrentHashMap<Long, AtomicBoolean> chunkEvents = new ConcurrentHashMap<>();
+    private static final int CACHE_BUCKETS = 64;
     private static int threads = 0;
+    private static DiskBackedBucketedLong2ObjectHashMap<SChunkDataPacketCustom> chunkDataPacketCache = null;
+    private static DiskBackedBucketedLong2ObjectHashMap<SUpdateLightPacketCustom> lightDataPacketCache = null;
 
     public static void reset(int threadCount) {
         // semaphore starts with 0 permits because threads are working when they start
@@ -38,6 +47,26 @@ public class ChunkThreadSyncManager {
         chunkPartsReceived.clear();
         chunkEvents.clear();
         threads = threadCount;
+    }
+
+    public static void createCache() {
+        if (chunkDataPacketCache != null) {
+            chunkDataPacketCache.clear();
+        }
+        if (lightDataPacketCache != null) {
+            lightDataPacketCache.clear();
+        }
+
+        chunkDataPacketCache = new DiskBackedBucketedLong2ObjectHashMap<>(
+                CACHE_BUCKETS,
+                WorldExporterClient.getCacheDirectory(),
+                ChunkThreadSyncManager::chunksBucket
+        );
+        lightDataPacketCache = new DiskBackedBucketedLong2ObjectHashMap<>(
+                CACHE_BUCKETS,
+                WorldExporterClient.getCacheDirectory(),
+                ChunkThreadSyncManager::chunksBucket
+        );
     }
 
     public static void add(Runnable task) {
@@ -99,7 +128,7 @@ public class ChunkThreadSyncManager {
         AtomicBoolean chunkReceived = getChunkEvent(x, z);
         while (!chunkReceived.get()) {
             try {
-                Thread.sleep(10);
+                Thread.sleep(1);
             } catch (InterruptedException ignored) {
             }
         }
@@ -123,7 +152,7 @@ public class ChunkThreadSyncManager {
     public static void waitForThreadsReady() {
         while (!threadsShouldResume.get()) {
             try {
-                Thread.sleep(10);
+                Thread.sleep(1);
             } catch (InterruptedException ignored) {
             }
         }
@@ -175,7 +204,7 @@ public class ChunkThreadSyncManager {
                 }
 
                 try {
-                    Thread.sleep(10);
+                    Thread.sleep(1);
                 } catch (InterruptedException ignored) {
                 }
 
@@ -195,12 +224,31 @@ public class ChunkThreadSyncManager {
         return pendingChunks.contains(ChunkPos.asLong(x, z));
     }
 
+    // Blocks until the desired chunk can be returned. Usable on or off the main thread
     public static void requestChunk(int pChunkX, int pChunkZ) {
         long pos = ChunkPos.asLong(pChunkX, pChunkZ);
-        if (!isPending(pChunkX, pChunkZ)) {
-            pendingChunks.add(pos);
-            // WorldExporter.LOGGER.info(String.format("Req chunk: x:%d, z:%d", pChunkX, pChunkZ));
-            PacketHandler.INSTANCE.sendToServer(new CRequestChunkPacket(pChunkX, pChunkZ));
+        boolean isNewlyPending = pendingChunks.add(pos);
+        boolean requestFromServer = false;
+        long bench = System.currentTimeMillis();
+        if (isNewlyPending) {
+            // avoid request to server again if we have the chunk in the cache
+            // since the chunk wasn't pending before, it means that if we have it in the cache then both parts should exist
+            //noinspection SynchronizeOnNonFinalField
+            synchronized (chunkDataPacketCache) {
+                if (chunkDataPacketCache.containsKey(pos)) {
+                    LOGGER.info(String.format("Load chunk packets from disk:\tx:%d\tz:%d", pChunkX, pChunkZ));
+                    SChunkDataPacketCustom.handle(chunkDataPacketCache.get(pos), false);
+                    SUpdateLightPacketCustom.handle(lightDataPacketCache.get(pos), false);
+                } else {
+                    requestFromServer = true;
+                }
+            }
+
+            if (requestFromServer) {
+                WorldExporter.LOGGER.info(String.format("Req chunk: x:%d\tz:%d", pChunkX, pChunkZ));
+                PacketHandler.INSTANCE.sendToServer(new CRequestChunkPacket(pChunkX, pChunkZ));
+                bench = System.currentTimeMillis();
+            }
         }
 
         if (ChunkThreadSyncManager.isMainThread()) {
@@ -211,9 +259,31 @@ public class ChunkThreadSyncManager {
         } else {
             ChunkThreadSyncManager.blockUntilChunk(pChunkX, pChunkZ);
         }
+
+        if (requestFromServer) {
+            LOGGER.info("Took " + (System.currentTimeMillis() - bench) + " ms for server chunk");
+        }
     }
 
     public static boolean requestsDisabled() {
         return requestsDisabled.get();
+    }
+
+    private static long chunksBucket(long chunkPos) {
+        return BucketFunctions.xzLocalityBucket(ChunkPos.getX(chunkPos), ChunkPos.getZ(chunkPos), 8);
+    }
+
+    public static void saveChunkDataPacket(SChunkDataPacketCustom packet) {
+        //noinspection SynchronizeOnNonFinalField
+        synchronized (chunkDataPacketCache) {
+            chunkDataPacketCache.put(packet.getPos(), packet);
+        }
+    }
+
+    public static void saveLightDataPacket(SUpdateLightPacketCustom packet) {
+        //noinspection SynchronizeOnNonFinalField
+        synchronized (chunkDataPacketCache) {
+            lightDataPacketCache.put(packet.getPos(), packet);
+        }
     }
 }

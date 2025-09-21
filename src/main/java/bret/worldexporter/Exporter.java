@@ -274,6 +274,7 @@ public class Exporter {
 
         // pause the IntegratedServer, if there is one
         // setPause(true);
+        ChunkThreadSyncManager.createCache();
     }
 
     // required to reset MC options related to rendering
@@ -408,6 +409,7 @@ public class Exporter {
         // Build the entire light connected set if segmentation is disabled.
         AtomicReference<SimpleSet<Long>> lightConnected = new AtomicReference<>();
         if (WorldExporterConfig.CLIENT.exportVisibleExteriorOnly.get() && !WorldExporterConfig.CLIENT.segmentedExteriorPathfinding.get()) {
+            LOGGER.info("Building full light connected set");
             Runnable task = () -> {
                 LightConnectedPathfinder lightFinder = new LightConnectedPathfinder(this, world);
                 lightConnected.set(lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get(), true));
