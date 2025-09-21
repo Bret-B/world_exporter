@@ -8,4 +8,6 @@ public interface SimpleSet<T> {
     boolean remove(T element);
 //    public boolean isEmpty();
 //    public void clear();
+
+    void dispose();
 }

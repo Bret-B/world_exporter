@@ -4,7 +4,7 @@ import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 
 import java.nio.file.Paths;
 
-public class DiskBackedBucketedLongFIFOQueue {
+public class DiskBackedBucketedLongFIFOQueue extends UsesBuckets<LongArrayFIFOQueue> {
     private static final String SUBDIR = "longqueue";
     private final DiskBackedBuckets<LongArrayFIFOQueue> buckets;
     private final int sizePerBucket;
@@ -12,12 +12,11 @@ public class DiskBackedBucketedLongFIFOQueue {
     private long enqueueBucket = 0;
     private long dequeueBucket = 0;
 
-    public DiskBackedBucketedLongFIFOQueue(int bucketCacheSize, int sizePerBucket, String baseCacheDir, CompressionType compressionType) {
+    public DiskBackedBucketedLongFIFOQueue(int bucketCacheSize, int sizePerBucket, String baseCacheDir) {
         buckets = new DiskBackedBuckets<>(
                 bucketCacheSize,
                 Paths.get(baseCacheDir, SUBDIR).toString(),
-                () -> new LongArrayFIFOQueue(sizePerBucket),
-                compressionType);
+                () -> new LongArrayFIFOQueue(sizePerBucket));
         this.sizePerBucket = sizePerBucket;
     }
 

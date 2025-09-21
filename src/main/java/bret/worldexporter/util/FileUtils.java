@@ -27,8 +27,7 @@ public class FileUtils {
             walk.sorted(Comparator.reverseOrder())
                     .map(Path::toFile)
                     .forEach(File::delete);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        } catch (Throwable ignored) {
         }
     }
 

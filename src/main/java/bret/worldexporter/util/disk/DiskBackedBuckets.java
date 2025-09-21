@@ -1,5 +1,6 @@
 package bret.worldexporter.util.disk;
 
+import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.util.FileUtils;
 import bret.worldexporter.util.NotifyingLRUCache;
 import it.unimi.dsi.fastutil.io.BinIO;
@@ -24,7 +25,7 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
     private final CompressionType compressionType;
 
     public DiskBackedBuckets(int bucketCacheSize, String baseCacheDir, Supplier<BucketValue> bucketValueSupplier) {
-        this(bucketCacheSize, baseCacheDir, bucketValueSupplier, CompressionType.LZ4);
+        this(bucketCacheSize, baseCacheDir, bucketValueSupplier, WorldExporterConfig.CLIENT.cacheCompressionType.get());
     }
 
     public DiskBackedBuckets(int bucketCacheSize, String baseCacheDir, Supplier<BucketValue> bucketValueSupplier, CompressionType compressionType) {
@@ -51,6 +52,7 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
         for (long key : memoryBuckets.keySet().toArray(new Long[0])) {
             removeBucket(key);
         }
+        dirty.clear();
     }
 
     public boolean bucketExists(long bucketKey) {
@@ -148,13 +150,12 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
         return Paths.get(directory.toString(), String.valueOf(bucketKey));
     }
 
-    @Override
-    protected void finalize() throws Throwable {
+    // Do not use this instance again after calling
+    public void dispose() {
+        clear();
         try {
             FileUtils.deleteDirectoryRecursive(directory);
         } catch (Throwable ignored) {
-        } finally {
-            super.finalize();
         }
     }
 }

@@ -51,10 +51,10 @@ public class ChunkThreadSyncManager {
 
     public static void createCache() {
         if (chunkDataPacketCache != null) {
-            chunkDataPacketCache.clear();
+            chunkDataPacketCache.dispose();
         }
         if (lightDataPacketCache != null) {
-            lightDataPacketCache.clear();
+            lightDataPacketCache.dispose();
         }
 
         chunkDataPacketCache = new DiskBackedBucketedLong2ObjectHashMap<>(

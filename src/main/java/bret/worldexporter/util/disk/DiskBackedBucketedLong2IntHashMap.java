@@ -5,7 +5,7 @@ import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import java.nio.file.Paths;
 import java.util.function.Function;
 
-public class DiskBackedBucketedLong2IntHashMap {
+public class DiskBackedBucketedLong2IntHashMap extends UsesBuckets<Long2IntOpenHashMap> {
     private static final String SUBDIR = "long2intmap";
     private final DiskBackedBuckets<Long2IntOpenHashMap> buckets;
     private final Function<Long, Long> bucketFunction;

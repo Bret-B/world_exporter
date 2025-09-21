@@ -192,6 +192,11 @@ public class LightConnectedPathfinder {
             }
         }
 
+        seen.dispose();
+        inUnexplored.dispose();
+        unexplored.dispose();
+        distanceToSkylight.dispose();
+
         return allLightConnected;
     }
 }

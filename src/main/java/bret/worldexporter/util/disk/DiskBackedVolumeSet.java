@@ -169,8 +169,8 @@ public class DiskBackedVolumeSet implements SimpleSet<Long> {
         return remove(pos.longValue());
     }
 
-    @Override
-    protected void finalize() throws Throwable {
+    // Do not use this instance again after calling
+    public void dispose() {
         try {
             for (int i = 0; i < maps.length; ++i) {
                 try {
@@ -182,8 +182,7 @@ public class DiskBackedVolumeSet implements SimpleSet<Long> {
                 } catch (Throwable ignored) {
                 }
             }
-        } finally {
-            super.finalize();
+        } catch (Throwable ignored) {
         }
     }
 }

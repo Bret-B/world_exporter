@@ -5,7 +5,7 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import java.nio.file.Paths;
 import java.util.function.Function;
 
-public class DiskBackedBucketedLongHashSet implements SimpleSet<Long> {
+public class DiskBackedBucketedLongHashSet extends UsesBuckets<LongOpenHashSet> implements SimpleSet<Long> {
     private static final String SUBDIR = "longset";
     private final DiskBackedBuckets<LongOpenHashSet> buckets;
     private final Function<Long, Long> bucketFunction;
