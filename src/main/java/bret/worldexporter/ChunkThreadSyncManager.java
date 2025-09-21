@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
 import static bret.worldexporter.WorldExporter.LOGGER;
+import static bret.worldexporter.networking.packets.PacketUtil.packetAsBytes;
 
 @SuppressWarnings("BusyWait")
 public class ChunkThreadSyncManager {
@@ -32,10 +33,10 @@ public class ChunkThreadSyncManager {
     private final static ConcurrentHashMap.KeySetView<Long, Boolean> pendingChunks = ConcurrentHashMap.newKeySet();
     private final static Long2ObjectOpenHashMap<boolean[]> chunkPartsReceived = new Long2ObjectOpenHashMap<>();
     private final static ConcurrentHashMap<Long, AtomicBoolean> chunkEvents = new ConcurrentHashMap<>();
-    private static final int CACHE_BUCKETS = 64;
+    private static final int CACHE_BUCKETS = 16;
     private static int threads = 0;
-    private static DiskBackedBucketedLong2ObjectHashMap<SChunkDataPacketCustom> chunkDataPacketCache = null;
-    private static DiskBackedBucketedLong2ObjectHashMap<SUpdateLightPacketCustom> lightDataPacketCache = null;
+    private static DiskBackedBucketedLong2ObjectHashMap<byte[]> chunkDataPacketCache = null;
+    private static DiskBackedBucketedLong2ObjectHashMap<byte[]> lightDataPacketCache = null;
 
     public static void reset(int threadCount) {
         // semaphore starts with 0 permits because threads are working when they start
@@ -237,8 +238,8 @@ public class ChunkThreadSyncManager {
             synchronized (chunkDataPacketCache) {
                 if (chunkDataPacketCache.containsKey(pos)) {
                     LOGGER.info(String.format("Load chunk packets from disk:\tx:%d\tz:%d", pChunkX, pChunkZ));
-                    SChunkDataPacketCustom.handle(chunkDataPacketCache.get(pos), false);
-                    SUpdateLightPacketCustom.handle(lightDataPacketCache.get(pos), false);
+                    SChunkDataPacketCustom.handle(SChunkDataPacketCustom.fromBytes(chunkDataPacketCache.get(pos)), false);
+                    SUpdateLightPacketCustom.handle(SUpdateLightPacketCustom.fromBytes(lightDataPacketCache.get(pos)), false);
                 } else {
                     requestFromServer = true;
                 }
@@ -270,20 +271,22 @@ public class ChunkThreadSyncManager {
     }
 
     private static long chunksBucket(long chunkPos) {
-        return BucketFunctions.xzLocalityBucket(ChunkPos.getX(chunkPos), ChunkPos.getZ(chunkPos), 8);
+        return BucketFunctions.xzLocalityBucket(ChunkPos.getX(chunkPos), ChunkPos.getZ(chunkPos), 2);
     }
 
     public static void saveChunkDataPacket(SChunkDataPacketCustom packet) {
+        byte[] data = packetAsBytes(packet.nested);
         //noinspection SynchronizeOnNonFinalField
         synchronized (chunkDataPacketCache) {
-            chunkDataPacketCache.put(packet.getPos(), packet);
+            chunkDataPacketCache.put(packet.getPos(), data);
         }
     }
 
     public static void saveLightDataPacket(SUpdateLightPacketCustom packet) {
+        byte[] data = packetAsBytes(packet.nested);
         //noinspection SynchronizeOnNonFinalField
         synchronized (chunkDataPacketCache) {
-            lightDataPacketCache.put(packet.getPos(), packet);
+            lightDataPacketCache.put(packet.getPos(), data);
         }
     }
 }

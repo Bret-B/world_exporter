@@ -15,8 +15,10 @@ import java.io.Serializable;
 import java.util.Objects;
 import java.util.function.Supplier;
 
+import static bret.worldexporter.networking.packets.PacketUtil.bytesAsBuffer;
+
 public class SChunkDataPacketCustom implements Serializable {
-    private SChunkDataPacket nested;
+    public transient SChunkDataPacket nested;
 
     public SChunkDataPacketCustom() {
     }
@@ -47,11 +49,17 @@ public class SChunkDataPacketCustom implements Serializable {
         }
     }
 
+    public static SChunkDataPacketCustom fromBytes(byte[] bytes) {
+        return decode(bytesAsBuffer(bytes));
+    }
+
     private void writeObject(java.io.ObjectOutputStream s) throws java.io.IOException {
-        PacketUtil.clientPacketWrite(s, nested, 1 << 20);
+        s.defaultWriteObject();
+        PacketUtil.clientPacketWrite(s, nested);
     }
 
     private void readObject(java.io.ObjectInputStream s) throws java.io.IOException, ClassNotFoundException {
+        s.defaultReadObject();
         nested = new SChunkDataPacket();
         PacketUtil.clientPacketRead(s, nested);
     }

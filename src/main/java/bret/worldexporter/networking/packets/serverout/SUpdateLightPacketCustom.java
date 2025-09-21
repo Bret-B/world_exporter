@@ -15,10 +15,13 @@ import java.io.Serializable;
 import java.util.Objects;
 import java.util.function.Supplier;
 
-public class SUpdateLightPacketCustom implements Serializable {
-    private SUpdateLightPacket nested;
+import static bret.worldexporter.networking.packets.PacketUtil.bytesAsBuffer;
 
-    public SUpdateLightPacketCustom() {}
+public class SUpdateLightPacketCustom implements Serializable {
+    public transient SUpdateLightPacket nested;
+
+    public SUpdateLightPacketCustom() {
+    }
 
     public SUpdateLightPacketCustom(SUpdateLightPacket nested) {
         this.nested = nested;
@@ -47,12 +50,18 @@ public class SUpdateLightPacketCustom implements Serializable {
     }
 
     private void writeObject(java.io.ObjectOutputStream s) throws java.io.IOException {
-        PacketUtil.clientPacketWrite(s, nested, 1 << 18);
+        s.defaultWriteObject();
+        PacketUtil.clientPacketWrite(s, nested);
     }
 
     private void readObject(java.io.ObjectInputStream s) throws java.io.IOException, ClassNotFoundException {
+        s.defaultReadObject();
         nested = new SUpdateLightPacket();
         PacketUtil.clientPacketRead(s, nested);
+    }
+
+    public static SUpdateLightPacketCustom fromBytes(byte[] bytes) {
+        return decode(bytesAsBuffer(bytes));
     }
 
     public static void handle(SUpdateLightPacketCustom packet, Supplier<NetworkEvent.Context> ctx) {
