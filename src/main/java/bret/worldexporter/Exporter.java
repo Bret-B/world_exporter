@@ -76,8 +76,8 @@ public class Exporter {
     private final Comparator<Quad> quadComparator = getQuadSort();
     private final Comparator<Quad> quadComparatorThreaded = getQuadSortThreaded();
     private final LinkedBlockingQueue<Runnable> mainThreadTasks = new LinkedBlockingQueue<>();
-    private final ExecutorService threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
     private final int threads;
+    private ExecutorService threadPool = null;
     private BlockPos highPos;
     private BlockPos lowPos;
     private BlockPos highPosClampedHeight;
@@ -85,6 +85,7 @@ public class Exporter {
     private AmbientOcclusionStatus preAO = mc.options.ambientOcclusion;
     private boolean preShadows = mc.options.entityShadows;
     private static Exporter instance = null;
+    private ClassLoader renderThreadClassLoader = null;
 
     public Exporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize, int threads) {
         OptifineReflector.init();
@@ -268,6 +269,10 @@ public class Exporter {
         }
     }
 
+    public void useClassLoaderOnThisThread() {
+        Thread.currentThread().setContextClassLoader(renderThreadClassLoader);
+    }
+
     // required to change MC options for proper export rendering
     public void setup() {
         preAO = mc.options.ambientOcclusion;
@@ -278,6 +283,8 @@ public class Exporter {
         // pause the IntegratedServer, if there is one
         // setPause(true);
         ChunkThreadSyncManager.createCache();
+        renderThreadClassLoader = Thread.currentThread().getContextClassLoader();
+        threadPool = ThreadUtils.threadPoolWithModClassLoader(Runtime.getRuntime().availableProcessors());
     }
 
     // required to reset MC options related to rendering
@@ -313,6 +320,7 @@ public class Exporter {
     private void preTouchChunks() {
         AtomicBoolean done = new AtomicBoolean(false);
         Runnable task = () -> {
+            useClassLoaderOnThisThread();
             AtomicInteger i = new AtomicInteger(1);
             ChunkPos.rangeClosed(new ChunkPos(lowPos), new ChunkPos(highPos)).forEach(chunkPos -> {
                 // hasChunk calls getChunk under the hood, and I'm not sure about obeying pLoad in the provider mixin
@@ -478,7 +486,7 @@ public class Exporter {
         // create the given amount of threads (capped to number of tasks), and start a runnable on each thread
         int numThreads = Math.min(threads, tasks.size());
         ChunkThreadSyncManager.reset(numThreads);
-        ExecutorService exporterThreadPool = Executors.newFixedThreadPool(numThreads);
+        ExecutorService exporterThreadPool = ThreadUtils.threadPoolWithModClassLoader(numThreads);
         LOGGER.info("Exporter created " + numThreads + " threads");
         tasks.forEach(exporterThreadPool::submit);
         exporterThreadPool.shutdown();
