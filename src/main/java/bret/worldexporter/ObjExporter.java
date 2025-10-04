@@ -8,6 +8,7 @@ import bret.worldexporter.util.LABPBRParser;
 import bret.worldexporter.util.LRUCache;
 import bret.worldexporter.util.OptifineReflector;
 import bret.worldexporter.util.disk.BucketFunctions;
+import bret.worldexporter.util.disk.CompressionType;
 import bret.worldexporter.util.disk.DiskBackedBucketedObject2IntHashMap;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.util.ResourceLocation;
@@ -33,9 +34,10 @@ public class ObjExporter extends Exporter {
     private final File texturePath = new File(baseDir, TEXTURE_DIR);
     // geometric vertices cache (tag v) for the .obj output which maps the vertex to its number in the file
     private final DiskBackedBucketedObject2IntHashMap<Vector3f> verticesCache = new DiskBackedBucketedObject2IntHashMap<>(
-            32,
+            512,
             WorldExporterClient.getCacheDirectory(),
-            ObjExporter::verticesBucket
+            ObjExporter::verticesBucket,
+            CompressionType.NONE
     );
     // uv texture coordinates cache (tag vt) for the .obj output which maps the uv value to its number in the file
     private final Map<Vector2f, Integer> uvCache = new LRUCache<>(500_000);
@@ -50,6 +52,7 @@ public class ObjExporter extends Exporter {
     private final Map<Triple<ResourceLocation, Integer, Integer>, String> modelToEmissiveMap = new HashMap<>();
     private final Map<Integer, String> modelIdToName = new HashMap<>();
     private BufferedWriter lastObjWriter = null;
+    private final AtomicLong chunkCount = new AtomicLong(0);
     private int modelCount = 0;
     private int vertCount = 0;
     private int uvCount = 0;
@@ -66,23 +69,7 @@ public class ObjExporter extends Exporter {
         boolean success = true;
 
         try (FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlBWriter = new BufferedWriter(mtlWriter, 8 << 20)) {  // 8 MB buffer
-            AtomicLong chunkCount = new AtomicLong(0);
-            Consumer<ArrayList<ExportChunk>> chunkConsumer = (exportChunks) -> {
-                for (ExportChunk exportChunk : exportChunks) {
-                    try {
-                        BufferedWriter objWriter = getObjWriter(objBaseFilename, fullMtlFilename, exportChunk);
-                        writeChunk(exportChunk, objWriter, mtlBWriter);
-                        String chunkNum = String.format("%,d", chunkCount.incrementAndGet());
-                        int paddingCount = Math.max(15 - chunkNum.length(), 0);
-                        String paddedNum = chunkNum + (new String(new char[paddingCount]).replace("\0", " "));
-                        LOGGER.info(String.format("Exported chunk %s At x: %d\tz: %d", paddedNum, exportChunk.xChunkPos, exportChunk.zChunkPos));
-                    } catch (Exception e) {
-                        LOGGER.error("Unable to write chunk to the obj/mtl file: ", e);
-                        throw new RuntimeException(e);
-                    }
-                }
-            };
-            runExport(chunkConsumer);
+            runExport(chunkConsumer(objBaseFilename, fullMtlFilename, mtlBWriter));
         } catch (IOException | InterruptedException e) {
             success = false;
         } finally {
@@ -95,6 +82,24 @@ public class ObjExporter extends Exporter {
         verticesCache.clear();
         finish();
         return success;
+    }
+
+    private Consumer<ArrayList<ExportChunk>> chunkConsumer(String objBaseFilename, String fullMtlFilename, BufferedWriter mtlBWriter) {
+        return (exportChunks) -> {
+            for (ExportChunk exportChunk : exportChunks) {
+                String chunkNum = String.format("%,d", chunkCount.incrementAndGet());
+                int paddingCount = Math.max(15 - chunkNum.length(), 0);
+                String paddedNum = chunkNum + (new String(new char[paddingCount]).replace("\0", " "));
+                try {
+                    BufferedWriter objWriter = getObjWriter(objBaseFilename, fullMtlFilename, exportChunk);
+                    writeChunk(exportChunk, objWriter, mtlBWriter);
+                    LOGGER.info(String.format("Exported chunk %s At x: %d\tz: %d", paddedNum, exportChunk.xChunkPos, exportChunk.zChunkPos));
+                } catch (Exception e) {
+                    LOGGER.error(String.format("Unable to export chunk %s At x: %d\tz: %d", paddedNum, exportChunk.xChunkPos, exportChunk.zChunkPos), e);
+                    throw new RuntimeException(e);
+                }
+            }
+        };
     }
 
     private synchronized BufferedWriter getObjWriter(String objBaseName, String fullMtlFilename, ExportChunk chunk) throws IOException {
@@ -485,6 +490,6 @@ public class ObjExporter extends Exporter {
     }
 
     private static long verticesBucket(Vector3f vec) {
-        return BucketFunctions.xzLocalityBucket((int) vec.getX(), (int) vec.getZ(), 16);
+        return BucketFunctions.xzLocalityBucket((int) vec.getX(), (int) vec.getZ(), 4);
     }
 }

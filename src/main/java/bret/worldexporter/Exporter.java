@@ -45,7 +45,7 @@ import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 public class Exporter {
     public static final int WORLD_HEIGHT_LIMIT = 255;
     public static final int WORLD_LOWER_HEIGHT_LIMIT = 0;
-    private static final int CHUNKS_PER_CONSUME = 10;
+    private static final int CHUNKS_PER_CONSUME = 1;
     private static final int OTHER_ORDER = 3;
     private static final Map<RenderType, Integer> renderOrder = new HashMap<RenderType, Integer>() {{
         put(RenderType.solid(), 0);

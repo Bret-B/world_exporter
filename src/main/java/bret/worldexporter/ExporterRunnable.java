@@ -644,11 +644,12 @@ class ExporterRunnable implements Runnable {
     // update any quads that overlap by translating by a small multiple of their normal
     private void fixOverlaps(Collection<ArrayList<Quad>> quadsArrays) {
         Exporter.removeDuplicateQuads(quadsArrays);
+        Collection<ArrayList<Quad>> toSort = quadsArrays.stream().filter(quads -> quads.size() >= 1).collect(Collectors.toList());
 
         boolean fallbackSort;
         // Delegates the task of sorting the quads to the main thread, which can generate the image data required for accurate sorting
         RunnableFuture<Boolean> task = new FutureTask<>(() -> {
-            quadsArrays.forEach(exporter::sortQuads);
+            toSort.forEach(exporter::sortQuads);
             return true;
         });
         try {
@@ -660,10 +661,14 @@ class ExporterRunnable implements Runnable {
         }
         if (fallbackSort) {
             // sort on thread instead, with less accuracy
-            quadsArrays.forEach(exporter::sortQuads);
+            toSort.forEach(exporter::sortQuads);
         }
 
         for (ArrayList<Quad> quads : quadsArrays) {
+            if (quads.size() <= 1) {
+                continue;
+            }
+
             Set<Integer> toCheck = new HashSet<>();
             for (int i = 0, size = quads.size(); i < size; ++i) {
                 toCheck.add(i);

@@ -11,11 +11,15 @@ public class DiskBackedBucketedObject2IntHashMap<T extends Serializable> extends
     private final DiskBackedBuckets<Object2IntOpenHashMap<T>> buckets;
     private final Function<T, Long> bucketFunction;
 
-    public DiskBackedBucketedObject2IntHashMap(int bucketCacheSize, String baseCacheDir, Function<T, Long> bucketFunction) {
+    public DiskBackedBucketedObject2IntHashMap(int bucketCacheSize,
+                                               String baseCacheDir,
+                                               Function<T, Long> bucketFunction,
+                                               CompressionType compressionType) {
         buckets = new DiskBackedBuckets<>(
                 bucketCacheSize,
                 Paths.get(baseCacheDir, SUBDIR).toString(),
-                Object2IntOpenHashMap::new);
+                Object2IntOpenHashMap::new,
+                compressionType);
         this.bucketFunction = bucketFunction;
     }
 
