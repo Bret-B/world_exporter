@@ -19,10 +19,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -61,7 +58,7 @@ public class ObjExporter extends Exporter {
         super(player, radius, lower, upper, optimizeMesh, randomize, threads);
     }
 
-    public boolean export(String objBaseFilename, String mtlBaseFilename) throws IOException {
+    public boolean export(String objBaseFilename, String mtlBaseFilename) throws IOException, InterruptedException {
         setup();
         Files.createDirectories(texturePath.toPath());
         String fullMtlFilename = mtlBaseFilename + ".mtl";
@@ -74,6 +71,9 @@ public class ObjExporter extends Exporter {
         } catch (IOException | InterruptedException e) {
             success = false;
         } finally {
+            consumerThread.shutdown();
+            //noinspection ResultOfMethodCallIgnored
+            consumerThread.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
             if (lastObjWriter != null) {
                 lastObjWriter.close();
             }

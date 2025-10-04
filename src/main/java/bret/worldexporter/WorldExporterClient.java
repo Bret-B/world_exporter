@@ -168,7 +168,7 @@ public class WorldExporterClient {
             );
             System.gc();
             return;
-        } catch (IOException e) {
+        } catch (IOException | InterruptedException e) {
             LOGGER.error("Export failed: " + e);
             success = false;
         } finally {
