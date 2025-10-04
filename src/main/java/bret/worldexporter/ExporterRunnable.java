@@ -174,17 +174,7 @@ class ExporterRunnable implements Runnable {
     private void consumeChunks() {
         ArrayList<ExportChunk> toConsume = resultChunks;
         resultChunks = new ArrayList<>();
-        try {
-            exporter.addMainThreadTask(() ->  {
-                try {
-                    chunkConsumer.accept(toConsume);
-                } catch (Throwable e) {
-                    LOGGER.warn("Unable to handle list of ExportChunks in ExporterRunnable consumeChunks task: ", e);
-                }
-            });
-        } catch (InterruptedException e) {
-            throw new RuntimeException("Error while trying to add exporter task in consumeChunks: ", e);
-        }
+        chunkConsumer.accept(toConsume);
     }
 
     private boolean canRenderInLayer(FluidState fluid, RenderType type) {

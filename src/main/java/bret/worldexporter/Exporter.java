@@ -45,7 +45,7 @@ import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 public class Exporter {
     public static final int WORLD_HEIGHT_LIMIT = 255;
     public static final int WORLD_LOWER_HEIGHT_LIMIT = 0;
-    private static final int CHUNKS_PER_CONSUME = 1;
+    private static final int CHUNKS_PER_CONSUME = 4;
     private static final int OTHER_ORDER = 3;
     private static final Map<RenderType, Integer> renderOrder = new HashMap<RenderType, Integer>() {{
         put(RenderType.solid(), 0);
@@ -331,7 +331,8 @@ public class Exporter {
                 if (i.incrementAndGet() % 100 == 0) {
                     i.set(1);
                     //noinspection StatementWithEmptyBody
-                    while (ChunkThreadSyncManager.hasPending()) {}
+                    while (ChunkThreadSyncManager.hasPending()) {
+                    }
                 }
             });
             done.set(true);
@@ -451,6 +452,7 @@ public class Exporter {
         if (WorldExporterConfig.CLIENT.exportVisibleExteriorOnly.get() && !WorldExporterConfig.CLIENT.segmentedExteriorPathfinding.get()) {
             LOGGER.info("Building full light connected set");
             Runnable task = () -> {
+                useClassLoaderOnThisThread();
                 LightConnectedPathfinder lightFinder = new LightConnectedPathfinder(this, world);
                 lightConnected.set(lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get(), true));
             };
@@ -501,7 +503,8 @@ public class Exporter {
                     // if the sync can be done now (all threads are waiting), execute the queued tasks and then return
                     ChunkThreadSyncManager.mainThreadEventLoop(ChunkThreadSyncManager::isEmpty, mainThreadTasks, true);
                 }
-            } catch (InterruptedException ignored) {}
+            } catch (InterruptedException ignored) {
+            }
         }
 
         // clear out all left-over tasks, if any
@@ -714,6 +717,7 @@ public class Exporter {
         };
     }
 
+    // Not thread safe
     private Comparator<Quad> getQuadSort() {
         return (quad1, quad2) -> {
             RenderType quad1Layer = quad1.getType();
@@ -723,18 +727,16 @@ public class Exporter {
             if (layer1Priority == -1 || layer2Priority == -1 || layer1Priority == layer2Priority) {
                 float avg1;
                 float avg2;
-                synchronized (this) {
-                    if (quad1.hasUV()) {
-                        avg1 = uvTransparencyCache.computeIfAbsent(Pair.of(quad1.getResource(), quad1.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad1)));
-                    } else {
-                        avg1 = (float) ((quad1.getColor() & 0xFF000000) >>> 24);
-                    }
+                if (quad1.hasUV()) {
+                    avg1 = uvTransparencyCache.computeIfAbsent(Pair.of(quad1.getResource(), quad1.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad1)));
+                } else {
+                    avg1 = (float) ((quad1.getColor() & 0xFF000000) >>> 24);
+                }
 
-                    if (quad2.hasUV()) {
-                        avg2 = uvTransparencyCache.computeIfAbsent(Pair.of(quad2.getResource(), quad2.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad2)));
-                    } else {
-                        avg2 = (float) ((quad2.getColor() & 0xFF000000) >>> 24);
-                    }
+                if (quad2.hasUV()) {
+                    avg2 = uvTransparencyCache.computeIfAbsent(Pair.of(quad2.getResource(), quad2.getUvBounds()), k -> ImgUtils.averageTransparencyValue(getImage(quad2)));
+                } else {
+                    avg2 = (float) ((quad2.getColor() & 0xFF000000) >>> 24);
                 }
                 // higher avg -> less transparent
                 return Float.compare(avg2, avg1);
@@ -751,6 +753,11 @@ public class Exporter {
         } else {
             mainThreadTasks.put(task);
         }
+    }
+
+    public <T> T waitForMainThreadTask(FutureTask<T> task) throws InterruptedException, ExecutionException {
+        addMainThreadTask(task);
+        return task.get();
     }
 
     protected void addThreadTask(Runnable task) {

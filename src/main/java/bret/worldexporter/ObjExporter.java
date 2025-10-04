@@ -3,13 +3,9 @@ package bret.worldexporter;
 import bret.worldexporter.config.WorldExporterConfig;
 import bret.worldexporter.legacylwjgl.Vector2f;
 import bret.worldexporter.legacylwjgl.Vector3f;
-import bret.worldexporter.util.ImgUtils;
-import bret.worldexporter.util.LABPBRParser;
-import bret.worldexporter.util.LRUCache;
-import bret.worldexporter.util.OptifineReflector;
+import bret.worldexporter.util.*;
 import bret.worldexporter.util.disk.BucketFunctions;
-import bret.worldexporter.util.disk.CompressionType;
-import bret.worldexporter.util.disk.DiskBackedBucketedObject2IntHashMap;
+import bret.worldexporter.util.disk.DiskBackedBucketedObject2ObjectHashMap;
 import net.minecraft.client.entity.player.ClientPlayerEntity;
 import net.minecraft.util.ResourceLocation;
 import org.apache.commons.lang3.tuple.Pair;
@@ -23,6 +19,10 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -33,15 +33,14 @@ public class ObjExporter extends Exporter {
     private final File baseDir = WorldExporterClient.getExportDirectory();
     private final File texturePath = new File(baseDir, TEXTURE_DIR);
     // geometric vertices cache (tag v) for the .obj output which maps the vertex to its number in the file
-    private final DiskBackedBucketedObject2IntHashMap<Vector3f> verticesCache = new DiskBackedBucketedObject2IntHashMap<>(
+    private final DiskBackedBucketedObject2ObjectHashMap<Vector3f, Long> verticesCache = new DiskBackedBucketedObject2ObjectHashMap<>(
             512,
             WorldExporterClient.getCacheDirectory(),
-            ObjExporter::verticesBucket,
-            CompressionType.NONE
+            ObjExporter::verticesBucket
     );
     // uv texture coordinates cache (tag vt) for the .obj output which maps the uv value to its number in the file
-    private final Map<Vector2f, Integer> uvCache = new LRUCache<>(500_000);
-    private final int[] vertUVIndices = new int[8];
+    private final Map<Vector2f, Long> uvCache = new LRUCache<>(500_000);
+    private final long[] vertUVIndices = new long[8];
     private final Map<Triple<ResourceLocation, Integer, Integer>, Integer> modelToIdMap = new HashMap<>();
     private final Map<Pair<Integer, Integer>, Integer> colorLightToIdMap = new HashMap<>();
     private final Map<ResourceLocation, String> resourceToNormalMap = new HashMap<>();
@@ -51,11 +50,12 @@ public class ObjExporter extends Exporter {
     private final Map<ResourceLocation, String> resourceToRoughnessLineMap = new HashMap<>();
     private final Map<Triple<ResourceLocation, Integer, Integer>, String> modelToEmissiveMap = new HashMap<>();
     private final Map<Integer, String> modelIdToName = new HashMap<>();
-    private BufferedWriter lastObjWriter = null;
     private final AtomicLong chunkCount = new AtomicLong(0);
+    private final Semaphore consumerSemaphore = new Semaphore(20);
+    private BufferedWriter lastObjWriter = null;
     private int modelCount = 0;
-    private int vertCount = 0;
-    private int uvCount = 0;
+    private long vertCount = 0;
+    private long uvCount = 0;
 
     public ObjExporter(ClientPlayerEntity player, int radius, int lower, int upper, boolean optimizeMesh, boolean randomize, int threads) {
         super(player, radius, lower, upper, optimizeMesh, randomize, threads);
@@ -67,9 +67,10 @@ public class ObjExporter extends Exporter {
         String fullMtlFilename = mtlBaseFilename + ".mtl";
         File mtlFile = new File(WorldExporterClient.getExportDirectory(), fullMtlFilename);
         boolean success = true;
+        ExecutorService consumerThread = ThreadUtils.threadPoolWithModClassLoader(1);
 
         try (FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlBWriter = new BufferedWriter(mtlWriter, 8 << 20)) {  // 8 MB buffer
-            runExport(chunkConsumer(objBaseFilename, fullMtlFilename, mtlBWriter));
+            runExport(chunkConsumer(objBaseFilename, fullMtlFilename, mtlBWriter, consumerThread));
         } catch (IOException | InterruptedException e) {
             success = false;
         } finally {
@@ -84,25 +85,36 @@ public class ObjExporter extends Exporter {
         return success;
     }
 
-    private Consumer<ArrayList<ExportChunk>> chunkConsumer(String objBaseFilename, String fullMtlFilename, BufferedWriter mtlBWriter) {
+    // Does not need to be called on the main thread but will create main thread tasks. Will block if queue is too large
+    private Consumer<ArrayList<ExportChunk>> chunkConsumer(String objBaseFilename,
+                                                           String fullMtlFilename,
+                                                           BufferedWriter mtlBWriter,
+                                                           ExecutorService consumerThread) {
         return (exportChunks) -> {
-            for (ExportChunk exportChunk : exportChunks) {
-                String chunkNum = String.format("%,d", chunkCount.incrementAndGet());
-                int paddingCount = Math.max(15 - chunkNum.length(), 0);
-                String paddedNum = chunkNum + (new String(new char[paddingCount]).replace("\0", " "));
-                try {
-                    BufferedWriter objWriter = getObjWriter(objBaseFilename, fullMtlFilename, exportChunk);
-                    writeChunk(exportChunk, objWriter, mtlBWriter);
-                    LOGGER.info(String.format("Exported chunk %s At x: %d\tz: %d", paddedNum, exportChunk.xChunkPos, exportChunk.zChunkPos));
-                } catch (Exception e) {
-                    LOGGER.error(String.format("Unable to export chunk %s At x: %d\tz: %d", paddedNum, exportChunk.xChunkPos, exportChunk.zChunkPos), e);
-                    throw new RuntimeException(e);
-                }
+            try {
+                consumerSemaphore.acquire();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
             }
+            consumerThread.submit(() -> {
+                for (ExportChunk exportChunk : exportChunks) {
+                    String chunkNum = String.format("%,d", chunkCount.incrementAndGet());
+                    int paddingCount = Math.max(15 - chunkNum.length(), 0);
+                    String paddedNum = chunkNum + (new String(new char[paddingCount]).replace("\0", " "));
+                    try {
+                        writeChunk(exportChunk, mtlBWriter, objBaseFilename, fullMtlFilename);
+                        LOGGER.info(String.format("Exported chunk %s At x: %d\tz: %d", paddedNum, exportChunk.xChunkPos, exportChunk.zChunkPos));
+                    } catch (Exception e) {
+                        LOGGER.error(String.format("Unable to export chunk %s At x: %d\tz: %d", paddedNum, exportChunk.xChunkPos, exportChunk.zChunkPos), e);
+                        throw new RuntimeException(e);
+                    }
+                }
+                consumerSemaphore.release();  // doesn't have to be called by the acquiring thread
+            });
         };
     }
 
-    private synchronized BufferedWriter getObjWriter(String objBaseName, String fullMtlFilename, ExportChunk chunk) throws IOException {
+    private BufferedWriter getObjWriter(String objBaseName, String fullMtlFilename, ExportChunk chunk) throws IOException {
         BufferedWriter writer;
         switch (WorldExporterConfig.CLIENT.chunkExportType.get()) {
             case SINGLE_FILE_SINGLE_OBJECT:
@@ -148,7 +160,9 @@ public class ObjExporter extends Exporter {
         return writer;
     }
 
-    private synchronized void writeChunk(ExportChunk exportChunk, Writer objWriter, Writer mtlWriter) throws IOException {
+    // Does not need to be called on the main thread but will create main thread tasks
+    private void writeChunk(ExportChunk exportChunk, Writer mtlWriter, String objBaseFilename, String fullMtlFilename) throws IOException, ExecutionException, InterruptedException {
+        Writer objWriter = getObjWriter(objBaseFilename, fullMtlFilename, exportChunk);
         Map<Integer, ArrayList<Quad>> quadsForModel = new HashMap<>();
         boolean exportHeightmap = WorldExporterConfig.CLIENT.outputHeightmap.get();
         boolean exportAOMap = WorldExporterConfig.CLIENT.outputAmbientocclusionMap.get();
@@ -196,7 +210,7 @@ public class ObjExporter extends Exporter {
             Triple<ResourceLocation, Integer, Integer> model = Triple.of(quad.getResource(), quad.getColor(), quad.getLightValue());
             int modelId;
             if (!modelToIdMap.containsKey(model)) {
-                BufferedImage image = getImage(quad);
+                BufferedImage image = waitForMainThreadTask(new FutureTask<>(() -> getImage(quad)));
                 if (image == null) {
                     LOGGER.warn("Skipped face with texture: " + quad.getResource() + " because Image was null");
                     modelToIdMap.put(model, -1);
@@ -255,7 +269,7 @@ public class ObjExporter extends Exporter {
                             || (!resourceToHeightMap.containsKey(quadResource) && exportHeightmap)
                             || (!resourceToAOMap.containsKey(quadResource) && WorldExporterConfig.CLIENT.outputAmbientocclusionMap.get())) {
                         boolean useOpenGL = WorldExporterConfig.CLIENT.normalFormat.get() == WorldExporterConfig.NormalFormat.OPENGL;
-                        nd = getNormalData(quad, useOpenGL);
+                        nd = waitForMainThreadTask(new FutureTask<>(() -> getNormalData(quad, useOpenGL)));
                     }
 
                     String normalTextureName = null;
@@ -301,7 +315,7 @@ public class ObjExporter extends Exporter {
                     if (!resourceToMetalLineMap.containsKey(quadResource)
                             || !resourceToRoughnessLineMap.containsKey(quadResource)
                             || !modelToEmissiveMap.containsKey(model)) {
-                        sd = getSpecularData(quad, WorldExporterConfig.CLIENT.perceptualRoughness.get());
+                        sd = waitForMainThreadTask(new FutureTask<>(() -> getSpecularData(quad, WorldExporterConfig.CLIENT.perceptualRoughness.get())));
                     }
 
                     String metalOutputLine = null;
@@ -407,7 +421,7 @@ public class ObjExporter extends Exporter {
     }
 
     // returns a String of relevant .obj file lines that represent the quad
-    private synchronized String quadToObj(Quad quad) {
+    private String quadToObj(Quad quad) {
         boolean hasUV = quad.hasUV();
         StringBuilder result = new StringBuilder(256);
         // loop through the quad vertices, calculating the .obj file index for position and uv coordinates
@@ -421,7 +435,7 @@ public class ObjExporter extends Exporter {
                     y == null ? Float.NaN : y.floatValue(),
                     z == null ? Float.NaN : z.floatValue()
             );
-            int vertIndex;
+            long vertIndex;
             if (verticesCache.containsKey(position)) {
                 vertIndex = verticesCache.get(position);
             } else {
@@ -441,7 +455,7 @@ public class ObjExporter extends Exporter {
                         u == null ? Float.NaN : u.floatValue(),
                         v == null ? Float.NaN : v.floatValue()
                 );
-                int uvIndex;
+                long uvIndex;
                 if (uvCache.containsKey(uv)) {
                     uvIndex = uvCache.get(uv);
                 } else {
