@@ -6,7 +6,7 @@ import java.util.HashMap;
 import java.util.function.Function;
 
 public class DiskBackedBucketedObject2ObjectHashMap<T extends Serializable, V extends Serializable> extends UsesBuckets<HashMap<T, V>> {
-    private static final String SUBDIR = "object2intmap";
+    private static final String SUBDIR = "object2objectmap";
     private final DiskBackedBuckets<HashMap<T, V>> buckets;
     private final Function<T, Long> bucketFunction;
 
