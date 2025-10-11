@@ -178,7 +178,7 @@ public class WorldExporterConfig {
                             " This setting only applies when exportVisibleExteriorOnly=true." +
                             " Values higher than ((segmentChunkRadius + 1) * 16) might have less of an effect when segmentedExteriorPathfinding is enabled.")
                     .translation("worldexporter.config.client.maxVisibilityPathLength")
-                    .defineInRange("maxVisibilityPathLength", 48, 1, Integer.MAX_VALUE);
+                    .defineInRange("maxVisibilityPathLength", 128, 1, Integer.MAX_VALUE);
 
             segmentedExteriorPathfinding = builder
                     .comment("Enable to perform segmented pathfinding for exterior visibility." +
@@ -186,13 +186,13 @@ public class WorldExporterConfig {
                             " It may reduce effectiveness for high values of maxVisibilityPathLength." +
                             " This setting only applies when exportVisibleExteriorOnly=true.")
                     .translation("worldexporter.config.client.segmentedExteriorPathfinding")
-                    .define("segmentedExteriorPathfinding", false);
+                    .define("segmentedExteriorPathfinding", true);
 
             segmentChunkRadius = builder
                     .comment("The radius (in chunks) to do visibility pathfinding in when segmentedExteriorPathfinding=true." +
                             " Lower numbers will result in increased speed but less accuracy, especially if maxVisibilityPathLength is high.")
                     .translation("worldexporter.config.client.segmentChunkRadius")
-                    .defineInRange("segmentChunkRadius", 1, 0, 4);
+                    .defineInRange("segmentChunkRadius", 1, 0, 6);
 
             exportSides = builder
                     .comment("Enable to have the sides of the export be solid." +
