@@ -31,7 +31,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import javax.annotation.Nullable;
 import java.util.Map;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 @Mixin(ClientChunkProvider.class)
 public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
@@ -55,9 +54,10 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
                 (storage.inRange(pChunkX, pChunkZ) &&
                         storage.getIndex(pChunkX, pChunkZ) >= 0 &&
                         storage.chunks.get(storage.getIndex(pChunkX, pChunkZ)) == null))) {
+            // WorldExporter.LOGGER.info(String.format("Client requesting chunk from server: x:%d z:%d", pChunkX, pChunkZ));
             // request the chunk from the server (if not already done) and block appropriately until it has been added
             // then, fallthrough to the regular code which should properly return the chunk
-            // WorldExporter.LOGGER.info(String.format("Client requesting chunk from server: x:%d z:%d", pChunkX, pChunkZ));
+            // Note: this does not do the actual chunk storage update on the calling thread
             ChunkThreadSyncManager.requestChunkAndWait(pChunkX, pChunkZ);
         }
         // fallthrough
@@ -89,6 +89,7 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
 //    }
 
     // return: Chunk
+    // Ensure this is only called on the main thread!
     @Inject(at = @At(value = "HEAD"), method = "replaceWithPacketData", cancellable = true)
     private void onReplaceWithPacketData(int pX, int pZ, @Nullable BiomeContainer biomeContainer, PacketBuffer readBuffer,
                                          CompoundNBT heightMaps, int availableSections, boolean isFullChunk, CallbackInfoReturnable<Chunk> cir) {
@@ -149,15 +150,17 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
 
     @Mixin(ClientChunkProvider.ChunkArray.class)
     public static abstract class MixinChunkArray implements IMixinChunkArrayAccessor {
-        // TODO not currently thread safe? - due to the fact that functions can fall through to the base code.
-        //  A way to make this thread safe would be to copy the regular chunks into thread safe storage and then
-        //  use only custom thread safe code while the export is being done
+        // Not thread safe: lock-free and functions can fall through to the base code.
+        // A way to make this thread safe would be to use locks and copy the regular chunks into thread safe storage.
+        // Then only custom thread safe code is used while the export is being done.
+        // However, base Minecraft doesn't need any locking because it only does updates on the main thread.
+        // Reading during periods where it's guaranteed updates aren't being made is fine.
+        // Since that's the entire point of ChunkThreadSyncManager, this shouldn't need locks at all.
+
         // For a ChunkPos (X, Z), if worldexporter$addChunkCustom has been called with those coordinates then getIndex will return a
         // negative integer that will be valid for retrieving a chunk (nullable) in the additionalStorage map.
         // This also means that coordinate returns true for inRange() and other calls using that index are valid
         // note: chunkCount for base class is not updated
-        @Unique
-        private final ReentrantReadWriteLock worldexporter$lock = new ReentrantReadWriteLock();
         @Unique
         private final Map<Integer, Chunk> worldexporter$additionalStorage = new Int2ObjectOpenHashMap<>();
         @Unique
@@ -174,40 +177,39 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         @Final
         ClientChunkProvider this$0;
 
+        // Should only be called on the main thread when LRU chunk cache drops a chunk due to a new one being added
         @Unique
-        public void worldexporter$onForgetPairKey(long pair, int negativeKey) {
-            worldexporter$lock.writeLock().lock();
+        private void worldexporter$onForgetPairKey(long pair, int negativeKey) {
             Chunk removed = worldexporter$additionalStorage.remove(negativeKey);
             worldexporter$negativeKeyToPair.remove(negativeKey);
             worldexporter$reusableIndices.enqueue(negativeKey);
             if (removed != null && this$0.level != null) {
                 this$0.level.unload(removed);
             }
-            worldexporter$lock.writeLock().unlock();
         }
 
+        // Should only be called on the main thread
         @Unique
         public int worldexporter$addChunkCustom(int pX, int pZ, Chunk chunk) {
             long pairKey = Pairing.fromPair(pX, pZ);
 
-            worldexporter$lock.writeLock().lock();
             int intKey;
             if (worldexporter$reusableIndices.isEmpty()) {
                 intKey = --worldexporter$negativeCount;
             } else {
                 intKey = worldexporter$reusableIndices.dequeueInt();
             }
+            // Can cause least recently used chunk to drop
             worldexporter$pairToNegativeKey.put(pairKey, intKey);
             worldexporter$negativeKeyToPair.put(intKey, pairKey);
             worldexporter$additionalStorage.put(intKey, chunk);
-            worldexporter$lock.writeLock().unlock();
 
             return intKey;
         }
 
+        // Should only be called on the main thread
         @Unique
         public void worldexporter$removeChunkCustom(int index) {
-            worldexporter$lock.writeLock().lock();
             Chunk removed = worldexporter$additionalStorage.remove(index);
             if (removed != null && this$0.level != null) {
                 this$0.level.unload(removed);
@@ -215,18 +217,16 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
             worldexporter$pairToNegativeKey.remove(worldexporter$negativeKeyToPair.get(index));
             worldexporter$negativeKeyToPair.remove(index);
             worldexporter$reusableIndices.enqueue(index);
-            worldexporter$lock.writeLock().unlock();
         }
 
+        // Should only be called on the main thread
         @Unique
         public void worldexporter$clear() {
-            worldexporter$lock.writeLock().lock();
             worldexporter$additionalStorage.forEach((key, chunk) -> this$0.level.unload(chunk));
             worldexporter$negativeCount = 0;
             worldexporter$pairToNegativeKey.clear();  // note: does not invoke removal callback
             worldexporter$negativeKeyToPair.clear();
             worldexporter$additionalStorage.clear();
-            worldexporter$lock.writeLock().unlock();
         }
 
         // return: int
@@ -235,23 +235,21 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
             if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
             long pairKey = Pairing.fromPair(pX, pZ);
-            worldexporter$lock.readLock().lock();
             if (worldexporter$pairToNegativeKey.containsKey(pairKey)) {
                 int intKey = worldexporter$pairToNegativeKey.get(pairKey);
                 cir.setReturnValue(intKey);
                 cir.cancel();
             }
-            worldexporter$lock.readLock().unlock();
 
             // else: fallthrough to default function code
             // return Math.floorMod(pZ, this.viewRange) * this.viewRange + Math.floorMod(pX, this.viewRange);
         }
 
+        // Should only be called on the main thread
         @Inject(at = @At(value = "HEAD"), method = "replace(ILnet/minecraft/world/chunk/Chunk;)V", cancellable = true)
         private void onReplace(int pChunkIndex, Chunk pChunk, CallbackInfo ci) {
             if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
-            worldexporter$lock.writeLock().lock();
             if (worldexporter$additionalStorage.containsKey(pChunkIndex)) {
                 if (pChunk == null) {
                     worldexporter$removeChunkCustom(pChunkIndex);
@@ -260,7 +258,6 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
                 }
                 ci.cancel();
             }
-            worldexporter$lock.writeLock().unlock();
 
             // else: fallthrough to default function code
 //            Chunk chunk = this.chunks.getAndSet(pChunkIndex, pChunk);
@@ -273,13 +270,13 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
 //            }
         }
 
+        // Should only be called on the main thread
         // From what I can tell, the function is always called with pReplaceWith set to null to delete the chunk
         // return: Chunk
         @Inject(at = @At(value = "HEAD"), method = "replace(ILnet/minecraft/world/chunk/Chunk;Lnet/minecraft/world/chunk/Chunk;)Lnet/minecraft/world/chunk/Chunk;", cancellable = true)
         protected void onReplace(int pChunkIndex, Chunk pChunk, Chunk pReplaceWith, CallbackInfoReturnable<Chunk> cir) {
             if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
-            worldexporter$lock.writeLock().lock();
             if (worldexporter$additionalStorage.containsKey(pChunkIndex)) {
                 this$0.level.unload(pChunk);
                 if (pReplaceWith == null) {
@@ -290,7 +287,6 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
                 cir.setReturnValue(pChunk);
                 cir.cancel();
             }
-            worldexporter$lock.writeLock().unlock();
 
             // else: fallthrough to default function code
 //            if (this.chunks.compareAndSet(pChunkIndex, pChunk, pReplaceWith) && pReplaceWith == null) {
@@ -306,12 +302,10 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
             if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
             long pairKey = Pairing.fromPair(pX, pZ);
-            worldexporter$lock.readLock().lock();
             if (worldexporter$pairToNegativeKey.containsKey(pairKey)) {
                 cir.setReturnValue(true);
                 cir.cancel();
             }
-            worldexporter$lock.readLock().unlock();
 
             // else: fallthrough to default function code
             // return Math.abs(pX - this.viewCenterX) <= this.chunkRadius && Math.abs(pZ - this.viewCenterZ) <= this.chunkRadius;
@@ -322,12 +316,10 @@ public abstract class MixinClientChunkProvider extends AbstractChunkProvider {
         protected void getChunk(int pChunkIndex, CallbackInfoReturnable<Chunk> cir) {
             if (!WorldExporterClient.isClientExporting() || !WorldExporterClient.canRequestChunks()) return;
 
-            worldexporter$lock.readLock().lock();
             if (worldexporter$additionalStorage.containsKey(pChunkIndex)) {
                 cir.setReturnValue(worldexporter$additionalStorage.get(pChunkIndex));
                 cir.cancel();
             }
-            worldexporter$lock.readLock().unlock();
 
             // else: fallthrough to default function code
             // return this.chunks.get(pChunkIndex);
