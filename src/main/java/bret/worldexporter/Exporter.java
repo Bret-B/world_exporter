@@ -446,7 +446,7 @@ public class Exporter {
     }
 
     // this function MUST be run on the main thread
-    public void runExport(Consumer<ArrayList<ExportChunk>> chunkConsumer) throws InterruptedException {
+    public void runExport(Consumer<ArrayList<ExportChunk>> chunkConsumer) throws InterruptedException, ExecutionException {
         if (WorldExporterClient.canRequestChunks()) {
             // improve export speed by caching all the chunks we'll need beforehand
             LOGGER.info("Caching chunks from server before beginning export");
@@ -457,23 +457,11 @@ public class Exporter {
             shrinkStartEndPosBBOXCardinal();
         }
 
-        // Build the entire light connected set if segmentation is disabled.
-        AtomicReference<SimpleSet<Long>> lightConnected = new AtomicReference<>();
-        if (WorldExporterConfig.CLIENT.exportVisibleExteriorOnly.get() && !WorldExporterConfig.CLIENT.segmentedExteriorPathfinding.get()) {
+        SimpleSet<Long> lightConnected = null;
+        if (WorldExporterConfig.CLIENT.exportVisibleExteriorOnly.get()) {
             LOGGER.info("Building full light connected set");
-            Runnable task = () -> {
-                useClassLoaderOnThisThread();
-                LightConnectedPathfinder lightFinder = new LightConnectedPathfinder(this, world);
-                lightConnected.set(lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get(), true));
-            };
-            if (WorldExporterClient.canRequestChunks()) {
-                ChunkThreadSyncManager.reset(1);
-                // this needs to be done on another thread so that chunk requests can be processed here on the main thread
-                (new Thread(task)).start();
-                ChunkThreadSyncManager.mainThreadEventLoop(() -> lightConnected.get() != null, null, false);
-            } else {
-                task.run();
-            }
+            LightConnectedPathfinder lightFinder = new LightConnectedPathfinder(this, world, threads);
+            lightConnected = lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get());
             LOGGER.info("Full light connected set done building");
         }
 
@@ -492,7 +480,7 @@ public class Exporter {
         if (chunkPartitions.size() > threads) throw new RuntimeException("chunkPartition size mismatch");
 
         for (List<Pair<BlockPos, BlockPos>> chunkPartition : chunkPartitions) {
-            tasks.add(new ExporterRunnable(this, chunkPartition, threadSafe, chunkConsumer, CHUNKS_PER_CONSUME, lightConnected.get()));
+            tasks.add(new ExporterRunnable(this, chunkPartition, threadSafe, chunkConsumer, CHUNKS_PER_CONSUME, lightConnected));
         }
 
         // create the given amount of threads (capped to number of tasks), and start a runnable on each thread
@@ -520,8 +508,8 @@ public class Exporter {
         // clear out all left-over tasks, if any
         runMainThreadTasksUntil(mainThreadTasks::isEmpty);
         ChunkThreadSyncManager.completeAllTasks();
-        if (lightConnected.get() != null) {
-            lightConnected.get().dispose();
+        if (lightConnected != null) {
+            lightConnected.dispose();
         }
     }
 

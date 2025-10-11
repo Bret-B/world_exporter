@@ -4,6 +4,7 @@ import com.google.common.collect.AbstractIterator;
 import net.minecraft.util.math.BlockPos;
 import org.apache.commons.lang3.tuple.Pair;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
@@ -256,5 +257,55 @@ public class BlockPosUtils {
                 return Pair.of(low, high);
             }
         };
+    }
+
+    // Divides a volume evenly into up to N non-overlapping xz boxes (striped). Positions are inclusive
+    public static Collection<Pair<BlockPos, BlockPos>> divideStripesXZ(BlockPos a, BlockPos b, int N) {
+        if (N <= 0) {
+            throw new RuntimeException("Invalid N value");
+        }
+
+        Pair<BlockPos, BlockPos> lowHigh = blockPosMinMax(a, b);
+        BlockPos low = lowHigh.getLeft();
+        BlockPos high = lowHigh.getRight();
+        int xDist = high.getX() - low.getX() + 1;
+        int zDist = high.getZ() - low.getZ() + 1;
+        boolean xLonger = xDist > zDist;
+        int stripeSize = Math.max(xDist, zDist) / N;
+        ArrayList<Pair<BlockPos, BlockPos>> results = new ArrayList<>();
+
+        if (stripeSize < 1) {
+            results.add(lowHigh);
+            return results;
+        }
+
+        BlockPos.Mutable mutableLow = new BlockPos.Mutable(low.getX(), low.getY(), low.getZ());
+        BlockPos.Mutable mutableHigh = new BlockPos.Mutable(
+                xLonger ? low.getX() + stripeSize - 1: high.getX(),
+                high.getY(),
+                xLonger ? high.getZ() : low.getZ() + stripeSize - 1
+        );
+
+        int start = (xLonger ? mutableHigh.getX() : mutableHigh.getZ());
+        int end = xLonger ? high.getX() : high.getZ();
+        for (int i = start; i <= end; i += stripeSize) {
+            if (results.size() == N - 1) {
+                // never return more than N stripes
+                results.add(Pair.of(mutableLow.immutable(), high));
+                return results;
+            }
+
+            results.add(Pair.of(mutableLow.immutable(), mutableHigh.immutable()));
+
+            if (xLonger) {
+                mutableLow.setX(mutableLow.getX() + stripeSize);
+                mutableHigh.setX(Math.min(mutableHigh.getX() + stripeSize, high.getX()));
+            } else {
+                mutableLow.setZ(mutableLow.getZ() + stripeSize);
+                mutableHigh.setZ(Math.min(mutableHigh.getZ() + stripeSize, high.getZ()));
+            }
+        }
+
+        return results;
     }
 }

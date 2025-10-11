@@ -12,9 +12,11 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Collection;
 import java.util.UUID;
 
 import static bret.worldexporter.Exporter.WORLD_HEIGHT_LIMIT;
+import static bret.worldexporter.WorldExporter.LOGGER;
 
 public class DiskBackedVolumeSet implements SimpleSet<Long> {
     private static final String SUBDIR = "volumebitset";
@@ -32,11 +34,15 @@ public class DiskBackedVolumeSet implements SimpleSet<Long> {
     private final int widthY;
     private final long blocksPerChunk;
     private final long numXChunks;
+    private final BlockPos low;
+    private final BlockPos high;
 
     public DiskBackedVolumeSet(String baseCacheDir, BlockPos start, BlockPos end) {
         Pair<BlockPos, BlockPos> lowHigh = BlockPosUtils.blockPosMinMax(start, end);
         BlockPos low = lowHigh.getLeft();
         BlockPos high = lowHigh.getRight();
+        this.low = low;
+        this.high = high;
         lowX = BlockPosUtils.lowestCoordinateInChunk(low.getX());
         lowZ = BlockPosUtils.lowestCoordinateInChunk(low.getZ());
         lowY = low.getY();
@@ -73,6 +79,35 @@ public class DiskBackedVolumeSet implements SimpleSet<Long> {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    // TODO: this is terrible
+    public static DiskBackedVolumeSet fromMerged(String baseCacheDir,
+                                                 BlockPos start,
+                                                 BlockPos end,
+                                                 Collection<DiskBackedVolumeSet> others) {
+        long startMillis = System.currentTimeMillis();
+
+        Pair<BlockPos, BlockPos> lowHigh = BlockPosUtils.blockPosMinMax(start, end);
+        DiskBackedVolumeSet result = new DiskBackedVolumeSet(baseCacheDir, start, end);
+
+        for (DiskBackedVolumeSet other : others) {
+            BlockPosUtils.betweenClosedChunkOrder(
+                            // The clamped range to check for the individual set
+                            //  is the highest of the lower values and the lowest of the higher values
+                            BlockPosUtils.blockPosMinMax(other.low, lowHigh.getLeft()).getRight(),
+                            BlockPosUtils.blockPosMinMax(other.high, lowHigh.getRight()).getLeft()
+                    )
+                    .forEach(blockPos -> {
+                        long pos = blockPos.asLong();
+                        if (other.contains(pos)) {
+                            result.add(pos);
+                        }
+                    });
+        }
+
+        LOGGER.info(String.format("Merged %d volume sets in %dms", others.size(), System.currentTimeMillis() - startMillis));
+        return result;
     }
 
     private void set(int map, long bit, boolean val) {

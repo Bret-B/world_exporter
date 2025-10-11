@@ -71,6 +71,7 @@ class ExporterRunnable implements Runnable {
     private final boolean renderCutout;
     private final Map<net.minecraftforge.registries.IRegistryDelegate<Block>, java.util.function.Predicate<RenderType>> blockRenderChecks;
     private final Map<net.minecraftforge.registries.IRegistryDelegate<Fluid>, java.util.function.Predicate<RenderType>> fluidRenderChecks;
+    private final SimpleSet<Long> lightConnected;
     private ArrayList<ExportChunk> resultChunks = new ArrayList<>();
     private BlockPos lastFixedBlock;
     private UUID lastFixedEntityUUID;
@@ -78,7 +79,6 @@ class ExporterRunnable implements Runnable {
     private BlockPos lastFallbackBlock;
     private UUID lastFallbackEntityUUID;
     private boolean lastFallbackIsBlock;
-    private SimpleSet<Long> lightConnected;
 
     @SuppressWarnings("unchecked")
     public ExporterRunnable(Exporter exporter, Collection<Pair<BlockPos, BlockPos>> chunkBoundaries,
@@ -206,18 +206,7 @@ class ExporterRunnable implements Runnable {
             return quads;
         }
 
-        boolean useLightConnected = WorldExporterConfig.CLIENT.exportVisibleExteriorOnly.get();
-        boolean segmentLightConnectionBuilding = WorldExporterConfig.CLIENT.segmentedExteriorPathfinding.get();
-        boolean lightNeedsSync = true;
-        if (useLightConnected && segmentLightConnectionBuilding) {
-            int segmentChunkDistance = WorldExporterConfig.CLIENT.segmentChunkRadius.get();
-            Pair<BlockPos, BlockPos> segment = BlockPosUtils.extendChunks(low, high, segmentChunkDistance);
-            LightConnectedPathfinder lightFinder = new LightConnectedPathfinder(exporter, exporter.world, segment.getLeft(), segment.getRight());
-            lightConnected = lightFinder.lightConnectedBlockSet(WorldExporterConfig.CLIENT.maxVisibilityPathLength.get(), false);
-            lightNeedsSync = false;
-        }
-
-        final SimpleSet<Long> lightConnectedSet = lightConnected;
+        boolean useLightConnected = lightConnected != null;
         Random random = new Random();
         MatrixStack matrixStack = new MatrixStack();
         float partialTicks = Minecraft.getInstance().getFrameTime();
@@ -226,16 +215,8 @@ class ExporterRunnable implements Runnable {
         BlockPos highClampedHeight = new BlockPos(high.getX(),
                 Math.max(WORLD_LOWER_HEIGHT_LIMIT, Math.min(WORLD_HEIGHT_LIMIT, high.getY())), high.getZ());
         for (BlockPos pos : BlockPosUtils.betweenClosedXZY(lowClampedHeight, highClampedHeight)) {
-            if (useLightConnected) {
-                if (lightNeedsSync) {
-                    synchronized (lightConnectedSet) {
-                        if (!lightConnected.contains(pos.asLong())) {
-                            continue;
-                        }
-                    }
-                } else if (!lightConnected.contains(pos.asLong())) {
-                    continue;
-                }
+            if (useLightConnected && !lightConnected.contains(pos.asLong())) {
+                continue;
             }
 
             BlockState state = chunk.getBlockState(pos);
