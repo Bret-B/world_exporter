@@ -288,7 +288,7 @@ public class Exporter {
         threadPool = ThreadUtils.threadPoolWithModClassLoader(Runtime.getRuntime().availableProcessors());
     }
 
-    // required to reset MC options related to rendering
+    // required to reset MC options related to rendering + finish tasks
     public void finish() {
         mc.options.ambientOcclusion = preAO;
         mc.options.entityShadows = preShadows;
@@ -297,6 +297,15 @@ public class Exporter {
         // setPause(false);
         Path cacheDir = Paths.get(WorldExporterClient.getCacheDirectory());
         deleteDirectoryRecursive(cacheDir);
+
+        // finish any other tasks
+        threadPool.shutdown();
+        try {
+            //noinspection ResultOfMethodCallIgnored
+            threadPool.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public boolean isOnExportEdge(BlockPos pos) {
@@ -511,11 +520,6 @@ public class Exporter {
         // clear out all left-over tasks, if any
         runMainThreadTasksUntil(mainThreadTasks::isEmpty);
         ChunkThreadSyncManager.completeAllTasks();
-        // finish any other tasks
-        threadPool.shutdown();
-        //noinspection ResultOfMethodCallIgnored
-        threadPool.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
-
         if (lightConnected.get() != null) {
             lightConnected.get().dispose();
         }
