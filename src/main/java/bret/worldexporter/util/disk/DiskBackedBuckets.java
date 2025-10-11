@@ -23,6 +23,7 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
     private final Supplier<BucketValue> bucketValueSupplier;
     private final Path directory;
     private final CompressionType compressionType;
+    private long thrashCount = 0;
 
     public DiskBackedBuckets(int bucketCacheSize, String baseCacheDir, Supplier<BucketValue> bucketValueSupplier) {
         this(bucketCacheSize, baseCacheDir, bucketValueSupplier, WorldExporterConfig.CLIENT.cacheCompressionType.get());
@@ -91,6 +92,7 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
             } catch (IOException | ClassNotFoundException | ClassCastException e) {
                 throw new RuntimeException(e);
             }
+            ++thrashCount;
             diskBuckets.remove(bucketKey);
             memoryBuckets.put(bucketKey, result);
         } else if (createBucket) {
@@ -127,6 +129,7 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
 
         // skip the write if it hasn't changed
         if (dirty.contains(bucketKey)) {
+            ++thrashCount;
             try {
                 switch (compressionType) {
                     case DEFLATE:
@@ -157,5 +160,9 @@ class DiskBackedBuckets<BucketValue extends Serializable> {
             FileUtils.deleteDirectoryRecursive(directory);
         } catch (Throwable ignored) {
         }
+    }
+
+    public long thrashCount() {
+        return thrashCount;
     }
 }

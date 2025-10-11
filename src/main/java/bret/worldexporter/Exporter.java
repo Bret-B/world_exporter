@@ -36,6 +36,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 import static bret.worldexporter.WorldExporter.LOGGER;
@@ -508,10 +509,7 @@ public class Exporter {
         }
 
         // clear out all left-over tasks, if any
-        for (Runnable task : mainThreadTasks) {
-            if (task != null) task.run();
-        }
-        mainThreadTasks.clear();
+        runMainThreadTasksUntil(mainThreadTasks::isEmpty);
         ChunkThreadSyncManager.completeAllTasks();
         // finish any other tasks
         threadPool.shutdown();
@@ -520,6 +518,18 @@ public class Exporter {
 
         if (lightConnected.get() != null) {
             lightConnected.get().dispose();
+        }
+    }
+
+    // Must only be called on the main thread
+    public void runMainThreadTasksUntil(BooleanSupplier hasFinished) {
+        while (!hasFinished.getAsBoolean()) {
+            try {
+                Runnable task = mainThreadTasks.poll(1, TimeUnit.MILLISECONDS);
+                if (task != null) task.run();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 

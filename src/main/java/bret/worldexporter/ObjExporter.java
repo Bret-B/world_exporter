@@ -72,8 +72,7 @@ public class ObjExporter extends Exporter {
             success = false;
         } finally {
             consumerThread.shutdown();
-            //noinspection ResultOfMethodCallIgnored
-            consumerThread.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
+            runMainThreadTasksUntil(consumerThread::isTerminated);
             if (lastObjWriter != null) {
                 lastObjWriter.close();
             }
