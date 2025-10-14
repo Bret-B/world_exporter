@@ -8,7 +8,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
 @Mixin(MinecraftServer.class)
@@ -22,14 +21,16 @@ public abstract class MixinMinecraftServer {
             return;
         }
 
-        if (WorldExporterServer.serverShouldBePaused.get()) {
-            ci.cancel();
-            // WorldExporter.LOGGER.info("Skipping server tick");
-            // keep the connections alive
-            Objects.requireNonNull(((MinecraftServer)(Object) this).getConnection()).tick();
-            // let the server unload chunks
-            WorldExporterServer.requesterWorld.get().getChunkSource().tick(pHasTimeLeft);
-        }
+//        if (WorldExporterServer.serverShouldBePaused.get()) {
+//            ci.cancel();
+//            // WorldExporter.LOGGER.info("Skipping server tick");
+//            // keep the connections alive
+//            Objects.requireNonNull(((MinecraftServer)(Object) this).getConnection()).tick();
+//            // let the server unload chunks (?)
+////            WorldExporterServer.requesterWorld.get().getChunkSource().tick(worldexporter$unlimitedTimeSupplier);
+////            WorldExporterServer.requesterWorld.get().getChunkSource().chunkMap.tick(worldexporter$unlimitedTimeSupplier);
+////            WorldExporterServer.requesterWorld.get().getChunkSource().chunkMap.processUnloads(worldexporter$unlimitedTimeSupplier);
+//        }
 
         WorldExporterServer.processTasks(worldexporter$unlimitedTimeSupplier);
     }
