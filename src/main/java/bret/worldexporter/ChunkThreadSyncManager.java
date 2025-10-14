@@ -180,6 +180,15 @@ public class ChunkThreadSyncManager {
         // e.g., handling chunk packet which asks to update nearby blocks which requests another chunk, etc.
         boolean preDisabled = requestsDisabled();
         requestsDisabled.set(true);
+
+        // no idea if we need these, but keep them from building up
+        Runnable runnable;
+        while((runnable = Minecraft.getInstance().progressTasks.poll()) != null) {
+            runnable.run();
+        }
+        // generally don't care about these during an export (as far as I can tell)
+        Minecraft.getInstance().pendingRunnables.clear();
+
         while (!threadSyncRequiredTasks.isEmpty()) {
             Runnable task = threadSyncRequiredTasks.poll();
             if (task != null) task.run();
