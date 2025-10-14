@@ -68,11 +68,11 @@ public class ObjExporter extends Exporter {
 
         try (FileWriter mtlWriter = new FileWriter(mtlFile.getPath()); BufferedWriter mtlBWriter = new BufferedWriter(mtlWriter, 8 << 20)) {  // 8 MB buffer
             runExport(chunkConsumer(objBaseFilename, fullMtlFilename, mtlBWriter, consumerThread));
+            consumerThread.shutdown();
+            runMainThreadTasksUntil(consumerThread::isTerminated);
         } catch (IOException | InterruptedException | ExecutionException e) {
             success = false;
         } finally {
-            consumerThread.shutdown();
-            runMainThreadTasksUntil(consumerThread::isTerminated);
             if (lastObjWriter != null) {
                 lastObjWriter.close();
             }
