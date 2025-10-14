@@ -17,6 +17,7 @@ buildscript {
 }
 
 plugins {
+
     id 'com.github.johnrengelman.shadow' version '7.1.2'  // com.gradleup.shadow does not have gradle 7 versions
 }
 
@@ -29,7 +30,7 @@ apply plugin: 'org.spongepowered.mixin'
 
 def mcversion = '1.16.5'
 
-version = '1.5.0'
+version = '1.6.0'
 group = 'bret.worldexporter' // http://maven.apache.org/guides/mini/guide-naming-conventions.html
 archivesBaseName = "worldexporter-${mcversion}"
 
