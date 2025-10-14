@@ -114,29 +114,13 @@ public class WorldExporterClient {
         }
     }
 
-    private static void execute(String msg, ClientPlayerEntity player) {
-        String argsString = msg.substring(CMD_BASE.length()).trim();
-        String[] params = argsString.isEmpty() ? new String[]{} : argsString.split("\\s+");
-        int radius = 64;
-        int lower = 0;
-        int upper = 255;
-        boolean optimizeMesh = true;
-        boolean randomizeTextureOrientation = false;
-        int threads = 4;
-        try {
-            radius = params.length >= 1 ? Integer.parseInt(params[0]) : radius;
-            lower = params.length >= 2 ? Integer.parseInt(params[1]) : lower;
-            upper = params.length >= 3 ? Integer.parseInt(params[2]) : upper;
-            optimizeMesh = params.length >= 4 ? Boolean.parseBoolean(params[3]) : optimizeMesh;
-            randomizeTextureOrientation = params.length >= 5 ? Boolean.parseBoolean(params[4]) : randomizeTextureOrientation;
-            threads = params.length >= 6 ? Integer.parseInt(params[5]) : threads;
-        } catch (Exception exception) {
-            player.sendMessage(new StringTextComponent("There was an error parsing the command arguments. " +
-                            "Example usage: " + CMD_BASE + " 64 0 255 true false 4"),
-                    Util.NIL_UUID
-            );
-            return;
-        }
+    public static void execute(ClientPlayerEntity player,
+                                int radius,
+                                int lower,
+                                int upper,
+                                boolean optimizeMesh,
+                                boolean randomizeTextureOrientation,
+                                int threads) {
 
         WorldExporterClient.baseDir = new File(
                 Minecraft.getInstance().gameDirectory,
@@ -186,16 +170,16 @@ public class WorldExporterClient {
 
     @SubscribeEvent
     public static void onClientChatEvent(ClientChatEvent event) {
-        String msg = event.getOriginalMessage();
-
-        ClientPlayerEntity player = Minecraft.getInstance().player;
-        ClientWorld world = Minecraft.getInstance().level;
-        if (player == null || world == null) return;
-
-        // the following commands are client side only, so the event is canceled if the msg matches a command
-        if (msg.startsWith(CMD_BASE)) {
-            event.setCanceled(true);
-            execute(msg, player);
-        }
+//        String msg = event.getOriginalMessage();
+//
+//        ClientPlayerEntity player = Minecraft.getInstance().player;
+//        ClientWorld world = Minecraft.getInstance().level;
+//        if (player == null || world == null) return;
+//
+//        // the following commands are client side only, so the event is canceled if the msg matches a command
+//        if (msg.startsWith(CMD_BASE)) {
+//            event.setCanceled(true);
+//            execute(msg, player);
+//        }
     }
 }

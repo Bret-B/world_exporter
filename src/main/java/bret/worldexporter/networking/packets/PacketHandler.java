@@ -4,10 +4,7 @@ import bret.worldexporter.WorldExporterClient;
 import bret.worldexporter.networking.packets.clientout.CCheckPermissionsPacket;
 import bret.worldexporter.networking.packets.clientout.CRequestChunkPacket;
 import bret.worldexporter.networking.packets.clientout.CSetExportStatePacket;
-import bret.worldexporter.networking.packets.serverout.SChunkDataPacketCustom;
-import bret.worldexporter.networking.packets.serverout.SPermissionsPacket;
-import bret.worldexporter.networking.packets.serverout.SSetExportStateResponsePacket;
-import bret.worldexporter.networking.packets.serverout.SUpdateLightPacketCustom;
+import bret.worldexporter.networking.packets.serverout.*;
 import net.minecraft.entity.player.ServerPlayerEntity;
 import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.fml.network.NetworkRegistry;
@@ -49,5 +46,6 @@ public class PacketHandler {
         INSTANCE.registerMessage(index++, SSetExportStateResponsePacket.class, SSetExportStateResponsePacket::encode, SSetExportStateResponsePacket::decode, SSetExportStateResponsePacket::handle);
         INSTANCE.registerMessage(index++, SChunkDataPacketCustom.class, SChunkDataPacketCustom::encode, SChunkDataPacketCustom::decode, SChunkDataPacketCustom::handle);
         INSTANCE.registerMessage(index++, SUpdateLightPacketCustom.class, SUpdateLightPacketCustom::encode, SUpdateLightPacketCustom::decode, SUpdateLightPacketCustom::handle);
+        INSTANCE.registerMessage(index++, SInvokeExport.class, SInvokeExport::encode, SInvokeExport::decode, SInvokeExport::handle);
     }
 }
